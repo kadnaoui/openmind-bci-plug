@@ -85,6 +85,7 @@ MNE-LSL...) can then pick up the `openmind-eeg` stream, described in the
 | `openmind-plug list-sources` | List sources and whether they can be used |
 | `openmind-plug stream --source …` | Publish a source as the standard LSL streams |
 | `openmind-plug check-stream` | Check a live stream against the specification |
+| `openmind-plug record --subject P01` | Record the stream to a FIF file ([details](docs/recording.md)) |
 
 Run any command with `--help` for its options.
 

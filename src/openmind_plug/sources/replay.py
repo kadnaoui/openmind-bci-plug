@@ -13,6 +13,7 @@ into ``$OPENMIND_DATA_DIR/mne_data``, never into the repository.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import threading
@@ -90,6 +91,7 @@ class MissingChannelsError(ValueError):
 class _Event:
     index: int  # sample index in the (resampled) recording
     label: str
+    kind: str = "cue"  # marker type: "cue" for dataset events, any type for recordings
 
 
 class ReplaySource(EEGSource):
@@ -156,8 +158,18 @@ class ReplaySource(EEGSource):
         scale = srate / original_srate
         n_total = self._data.shape[0]
         self._events = [
-            _Event(index=min(round(e.index * scale), n_total - 1), label=e.label) for e in events
+            _Event(index=min(round(e.index * scale), n_total - 1), label=e.label, kind=e.kind)
+            for e in events
         ]
+        # Cues are numbered from 1 as trials; other markers carry no trial number.
+        self._trials: list[int | None] = []
+        for event in self._events:
+            self._trials.append(
+                sum(t is not None for t in self._trials) + 1 if event.kind == "cue" else None
+            )
+        self._n_cues = sum(t is not None for t in self._trials)
+        if resolved is None:  # recognise a named montage from the channel list
+            resolved = next((m for m in MONTAGES.values() if m.labels == tuple(labels)), None)
 
         self._info = StreamInfo(
             srate=srate,
@@ -178,10 +190,15 @@ class ReplaySource(EEGSource):
     def from_file(cls, path: str | Path, **kwargs: Any) -> ReplaySource:
         """Replay a file readable by MNE (FIF, EDF, BDF, GDF, BrainVision...).
 
-        Keyword arguments are passed to the constructor.
+        Files written by :class:`~openmind_plug.recorder.Recorder` restore their stream
+        metadata (model, reference) and markers. Keyword arguments are passed to the
+        constructor and take precedence.
         """
         raw = mne.io.read_raw(Path(path), preload=True, verbose=False)
-        kwargs.setdefault("model", Path(path).name)
+        metadata = _recording_metadata(raw)
+        kwargs.setdefault("model", metadata.get("model") or Path(path).name)
+        if "reference" in metadata:
+            kwargs.setdefault("reference", metadata["reference"])
         return cls(raw, **kwargs)
 
     @classmethod
@@ -309,18 +326,16 @@ class ReplaySource(EEGSource):
         """Queue the markers of events in the sample range ``[first, first + n)``."""
         if n == 0 or not self._events:
             return
-        total, n_events = self.n_samples, len(self._events)
+        total = self.n_samples
         for lap in range(first // total, (first + n - 1) // total + 1):
             offset = lap * total
-            for number, event in enumerate(self._events):
+            for event, trial in zip(self._events, self._trials, strict=True):
                 index = offset + event.index
                 if first <= index < first + n:
-                    payload = {
-                        "type": "cue",
-                        "label": event.label,
-                        "trial": lap * n_events + number + 1,
-                        "source": "replay",
-                    }
+                    payload: dict[str, Any] = {"type": event.kind, "label": event.label}
+                    if trial is not None:
+                        payload["trial"] = lap * self._n_cues + trial
+                    payload["source"] = "replay"
                     self._pending_markers.append(Marker(self._t0 + index / self._rate, payload))
 
 
@@ -409,10 +424,23 @@ def _extract_events(
             named = [
                 (int(sample), names[int(code)]) for sample, _, code in events if int(code) in names
             ]
-    return [
-        _Event(index=sample - raw.first_samp, label=labels.get(name, name))
-        for sample, name in sorted(named)
-    ]
+    result: list[_Event] = []
+    for sample, name in sorted(named, key=lambda item: item[0]):  # stable: keeps file order
+        kind, _, label = name.partition("/") if "/" in name else ("cue", "", name)
+        if kind == "cue":
+            label = labels.get(label, label)
+        result.append(_Event(index=sample - raw.first_samp, label=label, kind=kind))
+    return result
+
+
+def _recording_metadata(raw: mne.io.BaseRaw) -> dict[str, Any]:
+    """Stream metadata saved by the recorder in the file description, if any."""
+    try:
+        content = json.loads(raw.info.get("description") or "")
+    except (TypeError, ValueError):
+        return {}
+    metadata = content.get("openmind") if isinstance(content, dict) else None
+    return metadata if isinstance(metadata, dict) else {}
 
 
 @contextmanager

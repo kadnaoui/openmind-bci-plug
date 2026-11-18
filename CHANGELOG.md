@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Source interface: `ChannelInfo`, `StreamInfo` (validated, immutable) and the
   `EEGSource` base class with context-manager support and output checks.
+- Recorder and `openmind-plug record`: EEG and markers saved to FIF with
+  pseudonymous subject ids only, 10-10 positions, stream metadata and gap
+  annotations, in `$OPENMIND_DATA_DIR/recordings/` by default. Recordings replay
+  identically, markers included. See `docs/recording.md`.
 - `openmind-plug stream` (synthetic with keyboard control, replay of datasets or
   files) and `openmind-plug list-sources`.
 - LSL stream specification 1.0.0 (`docs/stream-spec.md`): `openmind-eeg`

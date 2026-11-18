@@ -258,6 +258,10 @@ session by default and concatenates all its runs, in order.
 
    `trial` counts cues from 1 and keeps counting across loops.
 
+   Annotations written by the recorder (`state/left`, `artifact/blink`...) are
+   replayed with their own type and label, without `trial`. Recordings also
+   restore their model, reference and montage (see [recording](recording.md)).
+
 ### Playback
 
 - `read()` releases samples at the pace of the LSL clock; `speed=10.0` plays ten

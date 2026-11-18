@@ -239,6 +239,80 @@ def stream_command(
     )
 
 
+@app.command("record")
+def record_command(
+    subject: Annotated[
+        str,
+        typer.Option(
+            help="Pseudonymous subject id (P01, P02...), never a name.", show_default=False
+        ),
+    ],
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            help="Output file, ending with _raw.fif "
+            "(default: $OPENMIND_DATA_DIR/recordings/<subject>/<subject>_<date>_raw.fif).",
+            dir_okay=False,
+            show_default=False,
+        ),
+    ] = None,
+    duration: Annotated[
+        float | None,
+        typer.Option(help="Stop after this many seconds (default: until Ctrl+C).", min=0.1),
+    ] = None,
+    timeout: Annotated[
+        float, typer.Option(help="Seconds to wait for the stream to appear.", min=0.1)
+    ] = 5.0,
+    source_id: Annotated[
+        str | None, typer.Option(help="Record the stream with this LSL source_id.")
+    ] = None,
+    overwrite: Annotated[bool, typer.Option(help="Replace an existing file.")] = False,
+) -> None:
+    """Record the standard LSL stream (EEG and markers) to a FIF file.
+
+    Example:
+
+      openmind-plug record --subject P01 --duration 60
+    """
+    from openmind_plug.inlet import StreamNotFoundError
+    from openmind_plug.recorder import default_path, record_stream, validate_subject
+
+    try:
+        validate_subject(subject)
+    except ValueError as error:
+        _fail(str(error))
+    target = out or default_path(subject)
+    if not target.name.endswith("_raw.fif"):
+        _fail(f"recording file names must end with '_raw.fif', got {target.name}")
+    if target.exists() and not overwrite:
+        _fail(f"{target} already exists (use --overwrite to replace it)")
+    if _inside_git_repository(target):
+        typer.secho(
+            f"Warning: {target.parent} is inside a Git repository; EEG recordings are "
+            "health data and must never be committed.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+
+    try:
+        typer.echo("Waiting for the stream...")
+        recorder = record_stream(subject, duration=duration, timeout=timeout, source_id=source_id)
+    except StreamNotFoundError as error:
+        _fail(str(error))
+    if recorder.n_samples == 0:
+        _fail("no sample received; nothing was saved")
+    path = recorder.save(target, overwrite=overwrite)
+    typer.echo(
+        f"Saved {recorder.duration:.1f} s ({recorder.n_samples} samples, "
+        f"{recorder.n_markers} markers) to {path}"
+    )
+
+
+def _inside_git_repository(path: Path) -> bool:
+    """Whether ``path`` would be written inside a Git working tree."""
+    return any((parent / ".git").exists() for parent in path.resolve().parents)
+
+
 def _build_source(
     source: SourceName,
     *,
