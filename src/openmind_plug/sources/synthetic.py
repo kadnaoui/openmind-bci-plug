@@ -1,0 +1,485 @@
+"""Synthetic EEG source: a realistic, controllable and reproducible test signal.
+
+The signal of each channel, in microvolts, is the sum of:
+
+- a **1/f background** (pink noise), independent per channel;
+- **rhythm generators**, each a sinusoid with a slowly fluctuating amplitude, spread
+  over nearby electrodes with a Gaussian spatial weight:
+
+  - posterior **alpha** (8-12 Hz), much stronger with the eyes closed;
+  - **mu** (8-12 Hz) and **beta** (13-30 Hz) over the left (C3), central (Cz) and right
+    (C4) sensorimotor cortex;
+
+- optional **artifacts**: eye blinks (slow, large, frontal), muscle bursts (broadband
+  high frequency, lateral) and power-line noise (50 or 60 Hz).
+
+**Event-related desynchronization (ERD).** Imagining a movement lowers the mu and
+beta power over the opposite hemisphere. The current state drives this:
+``left`` lowers the generators over C4, ``right`` over C3, ``feet`` over Cz, ``rest``
+none. Gains move smoothly towards their target (time constant ``erd_tau_s``).
+
+**Reproducibility.** For a given seed and the same sequence of state changes, the
+signal only depends on the sample index, not on how it is split into reads: reading
+100 then 150 samples gives exactly the same data as reading 250 at once.
+"""
+
+from __future__ import annotations
+
+import math
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Final, Literal, cast
+
+import numpy as np
+import numpy.typing as npt
+import pylsl
+from pydantic import BaseModel, ConfigDict, Field
+from scipy import signal
+
+from openmind_plug.montage import Montage, get_montage, position
+from openmind_plug.sources.base import (
+    EEGSource,
+    Marker,
+    SampleArray,
+    StreamInfo,
+    TimestampArray,
+)
+
+State = Literal["rest", "left", "right", "feet"]
+Eyes = Literal["open", "closed"]
+
+#: Mental states the source can simulate.
+STATES: Final[tuple[State, ...]] = ("rest", "left", "right", "feet")
+
+#: Keyboard bindings used by interactive front-ends (see :meth:`SyntheticSource.handle_key`).
+KEY_BINDINGS: Final[dict[str, str]] = {
+    "r": "state: rest",
+    "a": "state: left",
+    "d": "state: right",
+    "s": "state: feet",
+    "e": "toggle eyes open / closed",
+    "b": "trigger a blink",
+}
+
+#: Lowest sampling rate supported: beta (up to 30 Hz) and muscle artifacts need headroom.
+MIN_SRATE: Final[float] = 100.0
+
+# IIR approximation of a 1/f power spectrum (J. O. Smith, "Spectral Audio Signal
+# Processing", pink noise filter); accurate within ~0.3 dB over three decades.
+_PINK_B: Final = np.array([0.049922035, -0.095993537, 0.050612699, -0.004408786])
+_PINK_A: Final = np.array([1.0, -2.494956002, 2.017265875, -0.522189400])
+
+_SPATIAL_SIGMA_M: Final = 0.025  # spread of a rhythm generator around its centre
+_BLINK_SIGMA_M: Final = 0.03  # spread of blinks around Fp1/Fp2
+_ENVELOPE_TAU_S: Final = 0.5  # time constant of the amplitude fluctuations
+_ENVELOPE_DEPTH: Final = 0.3  # relative standard deviation of the amplitude
+
+
+class SyntheticConfig(BaseModel):
+    """Amplitudes and artifact settings of :class:`SyntheticSource`.
+
+    Amplitudes are in microvolts. Rhythm amplitudes are peak values on the electrode
+    at the centre of the generator. All artifacts are disabled by default.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    background_uv: float = Field(default=15.0, ge=0, description="RMS of the 1/f background.")
+    alpha_open_uv: float = Field(default=4.0, ge=0, description="Alpha, eyes open.")
+    alpha_closed_uv: float = Field(default=20.0, ge=0, description="Alpha, eyes closed.")
+    mu_uv: float = Field(default=10.0, ge=0)
+    beta_uv: float = Field(default=4.0, ge=0)
+    erd_depth: float = Field(default=0.6, ge=0, le=1, description="Relative power drop.")
+    erd_tau_s: float = Field(default=0.3, gt=0, description="ERD onset/offset time constant.")
+    blink_rate_per_min: float = Field(default=0.0, ge=0)
+    blink_uv: float = Field(default=120.0, ge=0)
+    muscle_rate_per_min: float = Field(default=0.0, ge=0)
+    muscle_uv: float = Field(default=20.0, ge=0, description="RMS during a burst.")
+    line_noise_uv: float = Field(default=0.0, ge=0)
+    line_freq_hz: Literal[50, 60] = 50
+
+
+@dataclass
+class _Rhythm:
+    """One oscillating generator spread over several channels."""
+
+    kind: Literal["alpha", "mu", "beta"]
+    site: Literal["posterior", "left", "central", "right"]
+    freq_hz: float
+    amplitude_uv: float
+    phase: float
+    weights: npt.NDArray[np.float64]
+    gain: float = 1.0
+
+
+@dataclass
+class _Event:
+    """A transient artifact, pre-rendered for all channels."""
+
+    start: int
+    waveform: npt.NDArray[np.float64]  # (n_samples, n_channels)
+
+    @property
+    def stop(self) -> int:
+        return self.start + int(self.waveform.shape[0])
+
+
+class SyntheticSource(EEGSource):
+    """Realistic synthetic EEG with controllable motor-imagery state.
+
+    Args:
+        montage: Montage name or object; defines the channels (default ``"A"``).
+        srate: Sampling rate in Hz, at least :data:`MIN_SRATE`.
+        seed: Random seed; the same seed gives the same signal.
+        config: Amplitudes and artifacts; defaults to :class:`SyntheticConfig`.
+        emit_markers: Produce a marker at each state or eyes change and at each
+            artifact, as ground truth (see :meth:`read_markers`).
+        clock: Time source used by :meth:`read`; defaults to ``pylsl.local_clock``.
+
+    Example::
+
+        source = SyntheticSource(seed=42)
+        with source:
+            source.set_state("left")
+            samples, timestamps = source.read(max_samples=64)
+    """
+
+    def __init__(
+        self,
+        montage: str | Montage = "A",
+        srate: float = 250.0,
+        seed: int | None = None,
+        config: SyntheticConfig | None = None,
+        emit_markers: bool = True,
+        clock: Callable[[], float] = pylsl.local_clock,
+    ) -> None:
+        super().__init__()
+        self._montage = get_montage(montage) if isinstance(montage, str) else montage
+        self.config = config or SyntheticConfig()
+        if not srate >= MIN_SRATE or not math.isfinite(srate):
+            raise ValueError(f"srate must be finite and >= {MIN_SRATE} Hz, got {srate}")
+        self._info = StreamInfo(
+            srate=srate,
+            channels=self._montage.channels(),
+            manufacturer="OpenMind",
+            model="synthetic",
+            driver="synthetic",
+            reference="none",
+            montage=self._montage.name,
+        )
+        self._emit_markers = emit_markers
+        self._clock = clock
+        self._lock = threading.Lock()
+
+        positions = np.array(list(self._montage.positions().values()), dtype=np.float64)
+        n_channels = positions.shape[0]
+        seeds = np.random.SeedSequence(seed).spawn(6)
+        rngs = [np.random.default_rng(s) for s in seeds]
+        setup_rng, self._rng_background, self._rng_envelope = rngs[:3]
+        self._rng_events, self._rng_shapes, line_rng = rngs[3:]
+
+        # Background: unit-variance white noise through the pink filter, rescaled.
+        impulse = signal.lfilter(_PINK_B, _PINK_A, np.r_[1.0, np.zeros(20_000)])
+        self._pink_scale = self.config.background_uv / float(np.sqrt(np.sum(impulse**2)))
+        self._pink_zi = np.zeros((len(_PINK_A) - 1, n_channels))
+
+        self._rhythms = self._make_rhythms(positions, setup_rng)
+        self._envelope_rho = math.exp(-1.0 / (srate * _ENVELOPE_TAU_S))
+        self._envelope_zi = np.zeros((1, len(self._rhythms)))
+        self._gain_decay = math.exp(-1.0 / (srate * self.config.erd_tau_s))
+
+        self._line_weights: npt.NDArray[np.float64] = np.asarray(
+            line_rng.uniform(0.5, 1.5, size=n_channels), dtype=np.float64
+        )
+        self._line_phase = float(line_rng.uniform(0, 2 * math.pi))
+
+        # Blinks originate at the eyes, just below the frontal poles Fp1/Fp2.
+        poles = np.array([position("Fp1"), position("Fp2")])
+        dist = np.min(np.linalg.norm(positions[:, None, :] - poles[None], axis=2), axis=1)
+        self._blink_weights = np.exp(-(dist**2) / (2 * _BLINK_SIGMA_M**2))
+        self._muscle_weights = 0.3 + 0.7 * np.clip(np.abs(positions[:, 0]) / 0.085, 0, 1)
+        self._muscle_sos = signal.butter(4, 30.0, btype="highpass", fs=srate, output="sos")
+
+        self._state: State = "rest"
+        self._eyes: Eyes = "open"
+        self._applied: tuple[State, Eyes] | None = None
+        self._events: list[_Event] = []
+        self._unplaced_markers: list[tuple[int, dict[str, Any]]] = []
+        self._pending_markers: list[Marker] = []
+        self._produced = 0
+        self._t0 = 0.0
+        self._set_gain_targets(initial=True)
+
+    # --- Public API -----------------------------------------------------------
+
+    @property
+    def info(self) -> StreamInfo:
+        return self._info
+
+    @property
+    def state(self) -> State:
+        """Current mental state."""
+        return self._state
+
+    @property
+    def eyes(self) -> Eyes:
+        """Current eyes state."""
+        return self._eyes
+
+    @property
+    def n_produced(self) -> int:
+        """Number of samples generated so far."""
+        return self._produced
+
+    def set_state(self, state: str) -> None:
+        """Set the simulated mental state, applied from the next generated sample.
+
+        Raises:
+            ValueError: If ``state`` is not one of :data:`STATES`.
+        """
+        if state not in STATES:
+            raise ValueError(f"unknown state {state!r}; expected one of {list(STATES)}")
+        with self._lock:
+            self._state = state
+
+    def set_eyes(self, eyes: str) -> None:
+        """Open or close the simulated eyes (``"open"`` or ``"closed"``)."""
+        if eyes not in ("open", "closed"):
+            raise ValueError(f"eyes must be 'open' or 'closed', got {eyes!r}")
+        with self._lock:
+            self._eyes = cast(Eyes, eyes)
+
+    def blink(self) -> None:
+        """Trigger a blink at the next generated sample."""
+        with self._lock:
+            self._add_blink(self._produced)
+
+    def handle_key(self, key: str) -> bool:
+        """Apply a keyboard command from :data:`KEY_BINDINGS`.
+
+        Returns:
+            Whether the key was recognised.
+        """
+        key = key.lower()
+        states: dict[str, State] = {"r": "rest", "a": "left", "d": "right", "s": "feet"}
+        if key in states:
+            self.set_state(states[key])
+        elif key == "e":
+            self.set_eyes("closed" if self._eyes == "open" else "open")
+        elif key == "b":
+            self.blink()
+        else:
+            return False
+        return True
+
+    def generate(self, n_samples: int) -> SampleArray:
+        """Generate the next ``n_samples`` samples, regardless of the clock.
+
+        Useful offline (tests, datasets). In real time, use :meth:`read`, which paces
+        the output on the clock; mixing both shifts the real-time output.
+
+        Returns:
+            ``float32`` array of shape ``(n_samples, n_channels)``, in microvolts.
+        """
+        if n_samples < 0:
+            raise ValueError(f"n_samples must be >= 0, got {n_samples}")
+        with self._lock:
+            return self._generate(n_samples).astype(np.float32)
+
+    def read_markers(self) -> list[Marker]:
+        with self._lock:
+            markers, self._pending_markers = self._pending_markers, []
+        return markers
+
+    # --- EEGSource hooks ------------------------------------------------------
+
+    def _start(self) -> None:
+        # Anchor the clock so that the stream continues where it stopped.
+        self._t0 = self._clock() - self._produced / self._info.srate
+
+    def _stop(self) -> None:
+        pass
+
+    def _read(self, max_samples: int) -> tuple[SampleArray, TimestampArray]:
+        srate = self._info.srate
+        with self._lock:
+            # The small epsilon absorbs float rounding (0.4 s * 250 Hz = 99.99999...).
+            due = math.floor((self._clock() - self._t0) * srate + 1e-6) - self._produced
+            n = min(max(due, 0), max_samples)
+            first = self._produced
+            samples = self._generate(n).astype(np.float32)
+        timestamps = self._t0 + (first + np.arange(n, dtype=np.float64)) / srate
+        return samples, timestamps
+
+    # --- Generation -----------------------------------------------------------
+
+    def _generate(self, n: int) -> npt.NDArray[np.float64]:
+        n_channels = self._info.n_channels
+        if n == 0:
+            return np.zeros((0, n_channels))
+        self._apply_changes()
+        srate = self._info.srate
+        cfg = self.config
+        index = self._produced + np.arange(n, dtype=np.float64)
+        t: npt.NDArray[np.float64] = index / srate
+
+        white = self._rng_background.standard_normal((n, n_channels))
+        out: npt.NDArray[np.float64]
+        out, self._pink_zi = signal.lfilter(_PINK_B, _PINK_A, white, axis=0, zi=self._pink_zi)
+        out *= self._pink_scale
+
+        rho = self._envelope_rho
+        noise = self._rng_envelope.standard_normal((n, len(self._rhythms)))
+        envelope, self._envelope_zi = signal.lfilter(
+            [math.sqrt(1 - rho**2)], [1.0, -rho], noise, axis=0, zi=self._envelope_zi
+        )
+        decay = self._gain_decay ** np.arange(1, n + 1)
+        for i, rhythm in enumerate(self._rhythms):
+            target = self._gain_targets[i]
+            gain = target + (rhythm.gain - target) * decay
+            rhythm.gain = float(gain[-1])
+            amplitude = (
+                rhythm.amplitude_uv * gain * np.maximum(0.0, 1.0 + _ENVELOPE_DEPTH * envelope[:, i])
+            )
+            wave = amplitude * np.sin(2 * math.pi * rhythm.freq_hz * t + rhythm.phase)
+            out += wave[:, None] * rhythm.weights[None, :]
+
+        if cfg.line_noise_uv > 0:
+            line = np.sin(2 * math.pi * cfg.line_freq_hz * t + self._line_phase)
+            out += cfg.line_noise_uv * line[:, None] * self._line_weights[None, :]
+
+        self._spawn_events(n)
+        stop = self._produced + n
+        for event in self._events:
+            lo, hi = max(event.start, self._produced), min(event.stop, stop)
+            if lo < hi:
+                out[lo - self._produced : hi - self._produced] += event.waveform[
+                    lo - event.start : hi - event.start
+                ]
+        self._events = [e for e in self._events if e.stop > stop]
+        self._produced = stop
+        self._place_markers()
+        return out
+
+    def _apply_changes(self) -> None:
+        current = (self._state, self._eyes)
+        if current == self._applied:
+            return
+        previous = self._applied
+        self._applied = current
+        self._set_gain_targets()
+        if previous is None:
+            return
+        if previous[0] != current[0]:
+            self._marker({"type": "state", "label": current[0]})
+        if previous[1] != current[1]:
+            self._marker({"type": "eyes", "label": current[1]})
+
+    def _set_gain_targets(self, initial: bool = False) -> None:
+        erd_site = {"rest": None, "left": "right", "right": "left", "feet": "central"}
+        site = erd_site[self._state]
+        cfg = self.config
+        alpha_max = max(cfg.alpha_open_uv, cfg.alpha_closed_uv)
+        alpha_now = cfg.alpha_closed_uv if self._eyes == "closed" else cfg.alpha_open_uv
+        targets = []
+        for rhythm in self._rhythms:
+            if rhythm.kind == "alpha":
+                targets.append(alpha_now / alpha_max if alpha_max > 0 else 1.0)
+            elif rhythm.site == site:
+                # erd_depth is a power drop: amplitude scales with its square root.
+                targets.append(math.sqrt(1.0 - cfg.erd_depth))
+            else:
+                targets.append(1.0)
+        self._gain_targets = targets
+        if initial:
+            for rhythm, target in zip(self._rhythms, targets, strict=True):
+                rhythm.gain = target
+
+    def _make_rhythms(
+        self, positions: npt.NDArray[np.float64], rng: np.random.Generator
+    ) -> list[_Rhythm]:
+        cfg = self.config
+        rhythms: list[_Rhythm] = []
+        # Alpha: weight grows from 0 at the central line to 1 over the occipital pole.
+        posterior = np.clip((-positions[:, 1] - 0.04) / 0.07, 0.0, 1.0)
+        rhythms.append(
+            _Rhythm(
+                kind="alpha",
+                site="posterior",
+                freq_hz=10.0 + rng.uniform(-0.5, 0.5),
+                amplitude_uv=max(cfg.alpha_open_uv, cfg.alpha_closed_uv),
+                phase=rng.uniform(0, 2 * math.pi),
+                weights=posterior,
+            )
+        )
+        centres = {"left": "C3", "central": "Cz", "right": "C4"}
+        for kind, base_hz, amplitude in (("mu", 10.5, cfg.mu_uv), ("beta", 21.0, cfg.beta_uv)):
+            for site, label in centres.items():
+                centre = np.array(position(label))
+                dist = np.linalg.norm(positions - centre, axis=1)
+                weights = np.exp(-(dist**2) / (2 * _SPATIAL_SIGMA_M**2))
+                rhythms.append(
+                    _Rhythm(
+                        kind=cast(Literal["mu", "beta"], kind),
+                        site=cast(Literal["left", "central", "right"], site),
+                        freq_hz=base_hz + rng.uniform(-0.5, 0.5),
+                        amplitude_uv=amplitude,
+                        phase=rng.uniform(0, 2 * math.pi),
+                        weights=weights,
+                    )
+                )
+        return rhythms
+
+    # --- Artifacts ------------------------------------------------------------
+
+    def _spawn_events(self, n: int) -> None:
+        cfg = self.config
+        srate = self._info.srate
+        draws = self._rng_events.random((n, 2))
+        p_blink = cfg.blink_rate_per_min / 60.0 / srate
+        p_muscle = cfg.muscle_rate_per_min / 60.0 / srate
+        # Visit events in time order so that random draws do not depend on block sizes.
+        hits = np.argwhere(draws < np.array([p_blink, p_muscle]))
+        for offset, kind in hits:
+            start = self._produced + int(offset)
+            if kind == 0:
+                self._add_blink(start)
+            else:
+                self._add_muscle(start)
+
+    def _add_blink(self, start: int) -> None:
+        rng, srate = self._rng_shapes, self._info.srate
+        length = max(int(rng.uniform(0.25, 0.4) * srate), 3)
+        amplitude = self.config.blink_uv * rng.uniform(0.8, 1.2)
+        shape = amplitude * signal.windows.hann(length)
+        self._events.append(_Event(start, shape[:, None] * self._blink_weights[None, :]))
+        self._marker({"type": "artifact", "label": "blink"}, index=start)
+
+    def _add_muscle(self, start: int) -> None:
+        rng, srate = self._rng_shapes, self._info.srate
+        length = max(int(rng.uniform(0.5, 1.5) * srate), 8)
+        white = rng.standard_normal((length, len(self._muscle_weights)))
+        noise = signal.sosfilt(self._muscle_sos, white, axis=0)
+        noise /= np.std(noise, axis=0, keepdims=True) + 1e-12
+        taper = signal.windows.tukey(length, alpha=0.3)
+        waveform = self.config.muscle_uv * noise * taper[:, None] * self._muscle_weights[None, :]
+        self._events.append(_Event(start, waveform))
+        self._marker({"type": "artifact", "label": "muscle"}, index=start)
+
+    def _marker(self, payload: dict[str, Any], index: int | None = None) -> None:
+        """Queue a marker for the sample at ``index`` (default: the next sample)."""
+        if self._emit_markers:
+            index = self._produced if index is None else index
+            self._unplaced_markers.append((index, {**payload, "source": "synthetic"}))
+
+    def _place_markers(self) -> None:
+        """Timestamp the queued markers whose sample has now been generated."""
+        srate = self._info.srate
+        ready: list[tuple[int, dict[str, Any]]] = []
+        waiting: list[tuple[int, dict[str, Any]]] = []
+        for index, payload in self._unplaced_markers:
+            (ready if index < self._produced else waiting).append((index, payload))
+        self._unplaced_markers = waiting
+        for index, payload in sorted(ready, key=lambda item: item[0]):
+            self._pending_markers.append(Marker(self._t0 + index / srate, payload))

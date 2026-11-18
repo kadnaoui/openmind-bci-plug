@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Source interface: `ChannelInfo`, `StreamInfo` (validated, immutable) and the
   `EEGSource` base class with context-manager support and output checks.
+- Synthetic source: 1/f background, posterior alpha (eyes open/closed), mu and
+  beta over C3/Cz/C4 with controllable desynchronization (`rest`, `left`,
+  `right`, `feet`), optional blink, muscle and power-line artifacts, ground-truth
+  markers, keyboard bindings; deterministic with a seed.
+- `Marker` type and `EEGSource.read_markers()` for sources that produce events.
 - Montages: 10-10 electrode positions and named montages `A` (motor imagery,
   default) and `B` (SSVEP variant). See `docs/sources.md`.
 - Package skeleton: `src/` layout, `openmind-plug` command, optional extras

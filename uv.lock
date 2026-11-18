@@ -1890,6 +1890,8 @@ dependencies = [
     { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic" },
     { name = "pylsl" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "typer" },
 ]
 
@@ -1922,6 +1924,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.6" },
     { name = "pylsl", specifier = ">=1.16.2" },
+    { name = "scipy", specifier = ">=1.11" },
     { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["replay", "brainflow", "ironbci"]

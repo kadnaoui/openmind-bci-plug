@@ -122,3 +122,83 @@ Positions are approximate coordinates in meters for 47 electrodes of the 10-10
 system, in the MNE head frame (x towards the right ear, y towards the nose,
 z towards the vertex), taken from the MNE `standard_1005` template. They are meant
 for visualization and spatial filtering, not for source localization.
+
+## Synthetic source
+
+`SyntheticSource` generates realistic EEG without any hardware. It is the main
+test tool of the OpenMind ecosystem: deterministic with a seed, with a
+controllable motor-imagery state and optional artifacts.
+
+```python
+from openmind_plug.sources.synthetic import SyntheticConfig, SyntheticSource
+
+source = SyntheticSource(montage="A", srate=250, seed=42)
+with source:
+    source.set_state("left")  # imagine a left-hand movement
+    samples, timestamps = source.read(max_samples=64)
+    markers = source.read_markers()  # [Marker(timestamp, {"type": "state", ...})]
+```
+
+### Signal model
+
+Each channel, in microvolts, is the sum of:
+
+| Component | Model | Default |
+|---|---|---|
+| Background | 1/f (pink) noise, independent per channel | 15 µV RMS |
+| Alpha (8-12 Hz) | Posterior generator, weight 0 at the central line → 1 at O1/O2 | 4 µV eyes open, 20 µV eyes closed |
+| Mu (8-12 Hz) | Three generators centred on C3, Cz and C4 (Gaussian spread, σ = 2.5 cm) | 10 µV |
+| Beta (13-30 Hz) | Same three sites | 4 µV |
+
+Rhythm amplitudes fluctuate slowly (±30 %, time constant 0.5 s), as real
+rhythms wax and wane. Amplitudes are peak values at the centre of each generator.
+
+### State and event-related desynchronization
+
+Imagining a movement lowers mu and beta power over the opposite hemisphere:
+
+| State | Generators lowered | Key |
+|---|---|---|
+| `rest` | none | `r` |
+| `left` | C4 (right hemisphere) | `a` |
+| `right` | C3 (left hemisphere) | `d` |
+| `feet` | Cz | `s` |
+
+The power drop is `erd_depth` (default 60 %), reached smoothly with time
+constant `erd_tau_s` (default 0.3 s). `set_eyes("closed")` (key `e` toggles)
+raises posterior alpha the same way.
+
+### Artifacts (all off by default)
+
+| Artifact | Model | Settings |
+|---|---|---|
+| Blink | Hann pulse of 0.25-0.4 s, strongest on Fp1/Fp2 (σ = 3 cm) | `blink_rate_per_min`, `blink_uv` (120), or `blink()` / key `b` |
+| Muscle | Burst of 0.5-1.5 s of noise above 30 Hz, stronger on lateral channels | `muscle_rate_per_min`, `muscle_uv` (20 µV RMS) |
+| Power line | Sinusoid with a per-channel gain | `line_noise_uv`, `line_freq_hz` (50 or 60) |
+
+```python
+config = SyntheticConfig(blink_rate_per_min=15, line_noise_uv=5)
+source = SyntheticSource(seed=0, config=config)
+```
+
+### Markers (ground truth)
+
+With `emit_markers=True` (default), every state change, eyes change and artifact
+produces a marker whose timestamp is that of the first EEG sample it applies to:
+
+```json
+{"type": "state", "label": "left", "source": "synthetic"}
+{"type": "eyes", "label": "closed", "source": "synthetic"}
+{"type": "artifact", "label": "blink", "source": "synthetic"}
+```
+
+### Timing and reproducibility
+
+- `read()` returns the samples due according to the LSL clock since `start()`;
+  timestamps are perfectly regular (`t0 + index / srate`). After `stop()` and
+  `start()`, the stream resumes with no gap in sample indices.
+- `generate(n)` returns the next `n` samples immediately, ignoring the clock —
+  handy for offline tests and datasets.
+- For a given seed and sequence of state changes, the signal only depends on the
+  sample index, not on how it is split into reads.
+- `srate` must be at least 100 Hz.
