@@ -9,12 +9,15 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, NoReturn
+from typing import TYPE_CHECKING, Annotated, NoReturn
 
 import typer
 
 from openmind_plug import __version__
-from openmind_plug.sources.base import EEGSource
+from openmind_plug.sources.base import EEGSource, SampleArray
+
+if TYPE_CHECKING:
+    from openmind_plug.inlet import EEGInlet
 
 app = typer.Typer(
     name="openmind-plug",
@@ -306,6 +309,149 @@ def record_command(
         f"Saved {recorder.duration:.1f} s ({recorder.n_samples} samples, "
         f"{recorder.n_markers} markers) to {path}"
     )
+
+
+@app.command("quality")
+def quality_command(
+    window: Annotated[float, typer.Option(help="Seconds of signal per assessment.", min=1.0)] = 2.0,
+    duration: Annotated[
+        float | None,
+        typer.Option(help="Stop after this many seconds (default: until Ctrl+C).", min=1.0),
+    ] = None,
+    line_freq: Annotated[float, typer.Option(help="Power-line frequency in Hz (50 or 60).")] = 50.0,
+    saturation_uv: Annotated[
+        float | None,
+        typer.Option(help="Amplifier range in µV, if known, to detect saturation.", min=1.0),
+    ] = None,
+    alpha_test: Annotated[
+        bool,
+        typer.Option("--alpha-test", help="Run the guided eyes open / eyes closed test."),
+    ] = False,
+    phase: Annotated[float, typer.Option(help="Seconds of each alpha-test phase.", min=2.0)] = 30.0,
+    timeout: Annotated[
+        float, typer.Option(help="Seconds to wait for the stream to appear.", min=0.1)
+    ] = 5.0,
+    source_id: Annotated[
+        str | None, typer.Option(help="Check the stream with this LSL source_id.")
+    ] = None,
+) -> None:
+    """Show live signal quality per channel, or run the alpha test.
+
+    Live mode flags flat, saturated, noisy (50/60 Hz or high variance) and weak
+    channels every WINDOW seconds. With --alpha-test, follow the instructions: eyes
+    open, then eyes closed; the test passes when alpha power rises on at least one
+    channel (exit code 1 otherwise).
+    """
+    from openmind_plug.inlet import EEGInlet, StreamNotFoundError
+
+    try:
+        inlet = EEGInlet(timeout=timeout, source_id=source_id, with_markers=False)
+    except StreamNotFoundError as error:
+        _fail(str(error))
+    with inlet:
+        info = inlet.info
+        typer.secho(f"Quality of {inlet.source_id} ({info.n_channels} channels)", bold=True)
+        if alpha_test:
+            _run_alpha_test(inlet, phase)
+        else:
+            _run_live_quality(inlet, window, duration, line_freq, saturation_uv)
+
+
+def _collect(inlet: EEGInlet, seconds: float) -> SampleArray:
+    """Receive ``seconds`` of samples from an :class:`EEGInlet`."""
+    import numpy as np
+    import pylsl
+
+    n_target = round(seconds * inlet.info.srate)
+    blocks, count = [], 0
+    deadline = pylsl.local_clock() + seconds * 2 + 5
+    while count < n_target and pylsl.local_clock() < deadline:
+        samples, _ = inlet.read(max_samples=n_target - count, timeout=0.2)
+        blocks.append(samples)
+        count += samples.shape[0]
+    if count < n_target:
+        _fail(f"received only {count} of {n_target} samples; is the stream running?")
+    return np.vstack(blocks)
+
+
+_STATUS_COLORS = {"good": typer.colors.GREEN, "weak": typer.colors.YELLOW}
+
+
+def _run_live_quality(
+    inlet: EEGInlet,
+    window: float,
+    duration: float | None,
+    line_freq: float,
+    saturation_uv: float | None,
+) -> None:
+    import pylsl
+
+    from openmind_plug.quality import assess
+
+    typer.echo("  Press Ctrl+C to stop.")
+    start = pylsl.local_clock()
+    try:
+        while duration is None or pylsl.local_clock() - start + window <= duration + 0.5:
+            samples = _collect(inlet, window)
+            report = assess(
+                samples,
+                inlet.info.srate,
+                inlet.info.labels,
+                line_freq=line_freq,
+                saturation_uv=saturation_uv,
+            )
+            elapsed = pylsl.local_clock() - start
+            typer.echo(f"[{elapsed:5.0f} s]", nl=False)
+            for channel in report:
+                color = _STATUS_COLORS.get(channel.status, typer.colors.RED)
+                typer.echo(f"  {channel.label} ", nl=False)
+                typer.secho(channel.status, fg=color, nl=False)
+                typer.echo(f" {channel.std_uv:.0f}µV", nl=False)
+            typer.echo()
+    except KeyboardInterrupt:
+        pass
+
+
+def _run_alpha_test(inlet: EEGInlet, phase: float) -> None:
+    from openmind_plug.quality import (
+        ALPHA_GAIN_THRESHOLD,
+        ALPHA_MIN_RELIABLE_PHASE_S,
+        alpha_test,
+    )
+
+    if phase < ALPHA_MIN_RELIABLE_PHASE_S:
+        typer.secho(
+            f"Warning: phases shorter than {ALPHA_MIN_RELIABLE_PHASE_S:g} s give unreliable "
+            "results.",
+            fg=typer.colors.YELLOW,
+        )
+    typer.secho(f"1/2  Keep your eyes OPEN, look at a fixed point ({phase:g} s)...", bold=True)
+    eyes_open = _collect(inlet, phase)
+    typer.secho(f"2/2  CLOSE your eyes and relax ({phase:g} s)...", bold=True)
+    eyes_closed = _collect(inlet, phase)
+    typer.echo("Done, you can open your eyes.")
+
+    report = alpha_test(
+        eyes_open,
+        eyes_closed,
+        inlet.info.srate,
+        inlet.info.labels,
+    )
+    for label, gain in sorted(report.gains.items(), key=lambda item: -item[1]):
+        typer.echo(f"  {label:<5} alpha x{gain:.2f}")
+    if report.passed:
+        typer.secho(
+            f"PASSED: alpha rises x{report.best_gain:.1f} on {report.best_channel} "
+            f"(threshold x{ALPHA_GAIN_THRESHOLD}).",
+            fg=typer.colors.GREEN,
+        )
+    else:
+        typer.secho(
+            f"FAILED: best alpha increase x{report.best_gain:.2f} on {report.best_channel}, "
+            f"below x{ALPHA_GAIN_THRESHOLD}. Check posterior electrodes and relax.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
 
 
 def _inside_git_repository(path: Path) -> bool:

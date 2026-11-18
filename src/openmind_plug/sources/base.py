@@ -234,6 +234,13 @@ class EEGSource(ABC):
         """
         return []
 
+    def impedances(self) -> dict[str, float] | None:
+        """Last measured electrode impedances in kΩ, by label, or ``None``.
+
+        Only drivers whose hardware measures impedance override this.
+        """
+        return None
+
     def __enter__(self) -> Self:
         self.start()
         return self
