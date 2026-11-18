@@ -7,9 +7,11 @@ this interface, so any new driver gets the standard stream for free.
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 import numpy as np
 import numpy.typing as npt
@@ -117,6 +119,25 @@ class StreamInfo(BaseModel):
         return tuple(channel.label for channel in self.channels)
 
 
+@dataclass(frozen=True)
+class Marker:
+    """An event attached to the EEG stream (cue, state change, artifact...).
+
+    Args:
+        timestamp: Time of the event in seconds, on the LSL clock, aligned with the
+            timestamp of the first EEG sample it applies to.
+        payload: JSON-serializable content; by convention it has a ``"type"`` key
+            (``{"type": "state", "label": "left"}``).
+    """
+
+    timestamp: float
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    def to_json(self) -> str:
+        """Serialize the payload as compact JSON, as sent on the markers stream."""
+        return json.dumps(self.payload, separators=(",", ":"), sort_keys=True)
+
+
 class SourceStateError(RuntimeError):
     """Raised when a source is used in the wrong state (e.g. read before start)."""
 
@@ -204,6 +225,14 @@ class EEGSource(ABC):
                 f"expected ({samples.shape[0]},)"
             )
         return samples, timestamps
+
+    def read_markers(self) -> list[Marker]:
+        """Return and clear the markers produced since the last call.
+
+        Markers are only returned once the EEG samples they refer to have been
+        returned by :meth:`read`. Sources without markers return an empty list.
+        """
+        return []
 
     def __enter__(self) -> Self:
         self.start()

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from openmind_plug.sources import (
     ChannelInfo,
     EEGSource,
+    Marker,
     SampleArray,
     SourceStateError,
     StreamInfo,
@@ -182,3 +183,16 @@ def test_source_read_accepts_empty_block() -> None:
         samples, timestamps = source.read(max_samples=10)
     assert samples.shape == (0, 3)
     assert timestamps.shape == (0,)
+
+
+def test_source_has_no_markers_by_default() -> None:
+    with FakeSource() as source:
+        assert source.read_markers() == []
+
+
+# --- Marker -----------------------------------------------------------------
+
+
+def test_marker_serializes_compact_sorted_json() -> None:
+    marker = Marker(timestamp=12.5, payload={"type": "cue", "label": "left", "trial": 3})
+    assert marker.to_json() == '{"label":"left","trial":3,"type":"cue"}'
