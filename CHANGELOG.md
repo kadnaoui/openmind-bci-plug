@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Source interface: `ChannelInfo`, `StreamInfo` (validated, immutable) and the
   `EEGSource` base class with context-manager support and output checks.
+- Guides: getting started without a headset, adding a driver; examples
+  (scripted synthetic session, text band-power view, live plot, record and
+  replay), checked by mypy and smoke tests.
 - LSL relay source (`--source lsl`): republish a third-party LSL stream in
   standard form, with label renaming and normalization, unit detection or
   override, and montage selection.

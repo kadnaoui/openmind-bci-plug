@@ -24,17 +24,18 @@ well-described EEG stream, inside or outside OpenMind.
 
 ## Status
 
-Early development (pre-alpha). The package skeleton is in place; sources,
-LSL output and the CLI are being built. See [CHANGELOG.md](CHANGELOG.md).
+Alpha: usable without hardware. See [CHANGELOG.md](CHANGELOG.md).
 
-Planned sources:
+| Source | Status |
+|---|---|
+| **synthetic**: realistic generator (1/f background, alpha, mu/beta with controllable desynchronization, artifacts), seeded | available |
+| **replay**: public datasets (MOABB) and recorded files, in real time | available |
+| **lsl**: relay of a third-party LSL stream in standard form | available |
+| **brainflow**: any board supported by BrainFlow | planned |
+| **ironbci**: IronBCI-8 headset over BLE | planned (experimental) |
 
-- **synthetic**: realistic generator (1/f background, alpha, mu/beta with controllable
-  desynchronization, optional artifacts), deterministic with a seed
-- **replay**: public datasets (via MOABB/MNE) and recorded files, played back in real time
-- **lsl**: relay of an existing third-party LSL stream
-- **brainflow**: any board supported by BrainFlow
-- **ironbci**: IronBCI-8 headset over BLE (experimental)
+New here? Follow [Getting started without a headset](docs/getting-started.md).
+To support a new headset, see [Adding a driver](docs/adding-a-driver.md).
 
 ## Installation
 

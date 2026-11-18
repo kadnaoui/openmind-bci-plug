@@ -89,7 +89,7 @@ known-first-party = ["openmind_plug"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src"]
+files = ["src", "examples"]
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
