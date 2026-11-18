@@ -202,3 +202,74 @@ produces a marker whose timestamp is that of the first EEG sample it applies to:
 - For a given seed and sequence of state changes, the signal only depends on the
   sample index, not on how it is split into reads.
 - `srate` must be at least 100 Hz.
+
+## Replay source
+
+`ReplaySource` plays back a recording as if it were live: a public dataset
+downloaded with MOABB, or any file MNE can read (FIF, EDF, BDF, GDF,
+BrainVision...). Install the extra first:
+
+```bash
+pip install "openmind-plug[replay]"
+```
+
+```python
+from openmind_plug.sources.replay import ReplaySource
+
+# Public dataset (downloaded on first use)
+source = ReplaySource.from_dataset("physionetmi", subject=1, montage="A")
+
+# Any file readable by MNE
+source = ReplaySource.from_file("session_raw.fif", montage="A", loop=True)
+
+with source:
+    samples, timestamps = source.read(max_samples=64)
+    markers = source.read_markers()
+```
+
+### Supported datasets
+
+| Key | Dataset | Channels | Rate | Classes | Fits montage |
+|---|---|---|---|---|---|
+| `bnci2014_001` | BCI Competition IV 2a, 9 subjects | 22 EEG (no Fp1, no occipital) | 250 Hz | left, right, feet, tongue | none: use `montage=None` |
+| `physionetmi` | PhysioNet EEGMMIDB, 109 subjects | 64 EEG (10-10) | 160 Hz | left, right, hands, feet, rest | `A`, `B` |
+
+`from_dataset(dataset, subject=1, session=None, runs=None, ...)` loads the first
+session by default and concatenates all its runs, in order.
+
+### Processing
+
+1. **Channel selection.** With a montage, its electrodes are picked in montage
+   order; channel names are normalized (`"Fc3."` → `FC3`, `"EEG CZ"` → `Cz`).
+   If an electrode is missing, `MissingChannelsError` names it and lists the
+   montages that fit the recording (or suggests `montage=None`). Without a
+   montage (the default), every EEG channel is kept; EOG, EMG and stim channels
+   are dropped.
+2. **Units.** Data are converted from volts (MNE convention) to microvolts.
+3. **Resampling** to `srate` (250 Hz by default) when the recording differs.
+4. **Events → markers.** Annotations (or stim-channel codes, for datasets that
+   use them) become cue markers; `BAD_*` and `EDGE_*` annotations are ignored.
+   Dataset names are translated (`left_hand` → `left`, `right_hand` → `right`,
+   ...):
+
+   ```json
+   {"type": "cue", "label": "left", "trial": 12, "source": "replay"}
+   ```
+
+   `trial` counts cues from 1 and keeps counting across loops.
+
+### Playback
+
+- `read()` releases samples at the pace of the LSL clock; `speed=10.0` plays ten
+  times faster (timestamps follow the accelerated clock, so EEG and markers stay
+  aligned).
+- Without `loop`, the stream ends with the recording (`finished` becomes true and
+  `read()` returns empty blocks); with `loop=True`, it restarts seamlessly.
+- After `stop()` and `start()`, playback resumes where it stopped.
+
+### Where data go
+
+Downloads are stored in `$OPENMIND_DATA_DIR/mne_data` (default
+`~/openmind-data/mne_data`), never in the repository. Plug sets MNE's
+`MNE_DATASETS_*_PATH` variables only while loading, so your global MNE
+configuration is left untouched.
