@@ -18,6 +18,7 @@ from openmind_plug.sources.base import EEGSource, SampleArray
 
 if TYPE_CHECKING:
     from openmind_plug.inlet import EEGInlet
+    from openmind_plug.montage import Montage
 
 app = typer.Typer(
     name="openmind-plug",
@@ -71,7 +72,7 @@ SOURCES: dict[SourceName, _SourceEntry] = {
     SourceName.replay: _SourceEntry(
         "Recorded files (any MNE format) or public datasets, in real time"
     ),
-    SourceName.lsl: _SourceEntry("Relay of a third-party LSL stream", planned=True),
+    SourceName.lsl: _SourceEntry("Relay of a third-party LSL stream, in standard form"),
     SourceName.brainflow: _SourceEntry("Any BrainFlow-supported board", "brainflow", planned=True),
     SourceName.ironbci: _SourceEntry(
         "IronBCI-8 headset over BLE (experimental)", "ironbci", planned=True
@@ -112,6 +113,7 @@ def _datasets_available() -> bool:
 
 _SYNTH = "Synthetic source"
 _REPLAY = "Replay source"
+_RELAY = "LSL relay"
 
 
 @app.command("stream")
@@ -186,6 +188,30 @@ def stream_command(
     loop: Annotated[
         bool, typer.Option("--loop", help="Restart at the end.", rich_help_panel=_REPLAY)
     ] = False,
+    lsl_name: Annotated[
+        str | None, typer.Option(help="Name of the stream to relay.", rich_help_panel=_RELAY)
+    ] = None,
+    lsl_type: Annotated[
+        str, typer.Option(help="Type of the stream to relay.", rich_help_panel=_RELAY)
+    ] = "EEG",
+    lsl_source_id: Annotated[
+        str | None,
+        typer.Option(help="source_id of the stream to relay.", rich_help_panel=_RELAY),
+    ] = None,
+    unit: Annotated[
+        str | None,
+        typer.Option(
+            help="Unit of the incoming samples (uV, mV, V), if the stream does not say.",
+            rich_help_panel=_RELAY,
+        ),
+    ] = None,
+    rename: Annotated[
+        str | None,
+        typer.Option(
+            help='Channel renames, e.g. "EXG Channel 0=C3,EXG Channel 1=C4".',
+            rich_help_panel=_RELAY,
+        ),
+    ] = None,
 ) -> None:
     """Stream an EEG source as the standard OpenMind LSL streams.
 
@@ -194,6 +220,8 @@ def stream_command(
       openmind-plug stream --source synthetic --montage A
 
       openmind-plug stream --source replay --dataset bnci2014_001 --subject 1
+
+      openmind-plug stream --source lsl --lsl-name obci_eeg1 --unit uV --montage A
     """
     from openmind_plug.keyboard import key_reader, stdin_is_terminal
     from openmind_plug.outlet import EEGOutlet, stream
@@ -218,6 +246,7 @@ def stream_command(
         file=file,
         speed=speed,
         loop=loop,
+        relay=_RelayOptions(lsl_name, lsl_type, lsl_source_id, unit, rename),
     )
     info = built.info
     use_keyboard = source is SourceName.synthetic and (
@@ -475,10 +504,11 @@ def _build_source(
     file: Path | None,
     speed: float,
     loop: bool,
+    relay: _RelayOptions | None = None,
 ) -> EEGSource:
     from pydantic import ValidationError
 
-    from openmind_plug.montage import Montage, get_montage
+    from openmind_plug.montage import get_montage
 
     resolved: Montage | None = None
     if montage is not None:
@@ -500,6 +530,9 @@ def _build_source(
             return SyntheticSource(montage=resolved or "A", srate=srate, seed=seed, config=config)
         except (ValidationError, ValueError) as error:
             _fail(str(error))
+
+    if source is SourceName.lsl:
+        return _build_relay(relay or _RelayOptions(), resolved)
 
     from openmind_plug.sources.replay import MissingChannelsError, ReplaySource
 
@@ -524,6 +557,48 @@ def _build_source(
         )
     except (MissingChannelsError, KeyError, ValueError, ImportError) as error:
         _fail(str(error.args[0]) if error.args else str(error))
+
+
+@dataclass(frozen=True)
+class _RelayOptions:
+    name: str | None = None
+    stream_type: str = "EEG"
+    source_id: str | None = None
+    unit: str | None = None
+    rename: str | None = None
+
+
+def _parse_renames(text: str | None) -> dict[str, str]:
+    """Parse ``"old=new,old2=new2"`` into a mapping."""
+    renames: dict[str, str] = {}
+    for item in (text or "").split(","):
+        if not item.strip():
+            continue
+        old, sep, new = item.partition("=")
+        if not sep or not old.strip() or not new.strip():
+            _fail(f"invalid rename {item.strip()!r}; expected old=new")
+        renames[old.strip()] = new.strip()
+    return renames
+
+
+def _build_relay(options: _RelayOptions, montage: Montage | None) -> EEGSource:
+    from openmind_plug.inlet import StreamNotFoundError
+    from openmind_plug.sources.lsl_in import LSLSource, LSLSourceError
+
+    if options.name is None and options.source_id is None:
+        _fail("the lsl source needs --lsl-name or --lsl-source-id")
+    typer.echo("Looking for the stream to relay...")
+    try:
+        return LSLSource(
+            name=options.name,
+            stream_type=options.stream_type or None,
+            source_id=options.source_id,
+            rename=_parse_renames(options.rename),
+            unit=options.unit,
+            montage=montage,
+        )
+    except (StreamNotFoundError, LSLSourceError) as error:
+        _fail(str(error))
 
 
 def _start_keyboard(

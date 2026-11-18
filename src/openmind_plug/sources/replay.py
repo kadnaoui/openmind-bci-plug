@@ -28,7 +28,7 @@ import numpy as np
 import numpy.typing as npt
 import pylsl
 
-from openmind_plug.montage import MONTAGES, Montage, canonical_label, get_montage
+from openmind_plug.montage import MONTAGES, Montage, get_montage, normalize_label
 from openmind_plug.paths import data_dir
 from openmind_plug.sources.base import (
     ChannelInfo,
@@ -358,10 +358,10 @@ def _select_channels(raw: mne.io.BaseRaw, montage: Montage | None) -> tuple[list
         raise ValueError("the recording has no EEG channel")
     by_label: dict[str, str] = {}
     for name in eeg_names:
-        by_label.setdefault(_normalize(name), name)
+        by_label.setdefault(normalize_label(name), name)
 
     if montage is None:
-        labels = [_normalize(name) for name in eeg_names]
+        labels = [normalize_label(name) for name in eeg_names]
         if len(set(labels)) != len(labels):  # keep raw names if normalizing creates clashes
             labels = list(eeg_names)
         return list(eeg_names), labels
@@ -383,15 +383,6 @@ def _select_channels(raw: mne.io.BaseRaw, montage: Montage | None) -> tuple[list
             f"the recording lacks channels {missing} required by montage {montage.name!r}; " + hint
         )
     return [by_label[label] for label in montage.labels], list(montage.labels)
-
-
-def _normalize(name: str) -> str:
-    """Canonical 10-10 spelling of a channel name when known (``"FC3."`` → ``"FC3"``)."""
-    cleaned = name.strip().rstrip(".").removeprefix("EEG ").strip()
-    try:
-        return canonical_label(cleaned)
-    except KeyError:
-        return cleaned
 
 
 def _extract_events(

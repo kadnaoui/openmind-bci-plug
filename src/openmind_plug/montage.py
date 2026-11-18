@@ -85,6 +85,20 @@ def canonical_label(label: str) -> str:
         raise KeyError(f"unknown 10-10 electrode label {label!r}") from None
 
 
+def normalize_label(name: str) -> str:
+    """Clean a channel name from a file or device, using 10-10 spelling when known.
+
+    Strips whitespace, trailing dots and an ``"EEG "`` prefix, then applies
+    :func:`canonical_label` if the result is a 10-10 position: ``"Fc3."`` → ``"FC3"``,
+    ``"EEG CZ"`` → ``"Cz"``, ``"Custom"`` → ``"Custom"``.
+    """
+    cleaned = name.strip().rstrip(".").removeprefix("EEG ").strip()
+    try:
+        return canonical_label(cleaned)
+    except KeyError:
+        return cleaned
+
+
 def position(label: str) -> Position:
     """Return the ``(x, y, z)`` position in meters of a 10-10 electrode.
 

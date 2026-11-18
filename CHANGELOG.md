@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Source interface: `ChannelInfo`, `StreamInfo` (validated, immutable) and the
   `EEGSource` base class with context-manager support and output checks.
+- LSL relay source (`--source lsl`): republish a third-party LSL stream in
+  standard form, with label renaming and normalization, unit detection or
+  override, and montage selection.
 - Signal quality and `openmind-plug quality`: per-channel flat, saturated,
   line-noise, noisy and weak detection on high-passed data, impedance reporting
   hook, and a guided eyes open / closed alpha test. See `docs/quality.md`.

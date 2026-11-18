@@ -277,3 +277,32 @@ Downloads are stored in `$OPENMIND_DATA_DIR/mne_data` (default
 `~/openmind-data/mne_data`), never in the repository. Plug sets MNE's
 `MNE_DATASETS_*_PATH` variables only while loading, so your global MNE
 configuration is left untouched.
+
+## LSL relay
+
+`LSLSource` takes a third-party LSL stream (OpenBCI GUI, BrainFlow, PiEEG Server,
+vendor apps...) and exposes it as a source, so plug republishes it as the
+standard `openmind-eeg` stream in microvolts.
+
+```bash
+openmind-plug stream --source lsl --lsl-name obci_eeg1 --unit uV \
+    --rename "EXG Channel 0=Fp1,EXG Channel 1=FC3" --montage A
+```
+
+```python
+from openmind_plug.sources.lsl_in import LSLSource
+
+source = LSLSource(name="obci_eeg1", rename={"EXG Channel 0": "Fp1"}, unit="uV")
+```
+
+| Aspect | Behavior |
+|---|---|
+| Selection | By `name`, `stream_type` (default `EEG`) and/or `source_id`. The standard `openmind-eeg` stream is never picked, to avoid loops. |
+| Labels | From `channels/channel/label`, renamed with `rename`, then normalized (`"Fc3."` → `FC3`). Missing labels become `Ch1`, `Ch2`... Duplicates are an error. |
+| Units | `unit=` if given; else the description (`microvolts`, `uV`, `mV`, `volts`...); else microvolts are assumed, with a warning. The outlet converts to µV. |
+| Types | From the description when known (`EEG`, `EOG`, `EMG`, `ECG`, `MISC`), `EEG` when absent, `MISC` otherwise. |
+| Montage | Optional; selects and orders channels; missing labels are listed with a hint to use `rename`. |
+| Timestamps | LSL clock synchronization and de-jittering (`proc_clocksync`, `proc_dejitter`). |
+| Metadata | `model` = upstream stream name, `driver` = `lsl`, `manufacturer` and `reference` from the description when present. |
+
+Only regular streams (nominal rate > 0) are relayed.

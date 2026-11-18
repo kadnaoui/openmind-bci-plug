@@ -30,7 +30,8 @@ def test_list_sources_shows_every_source() -> None:
 
 def test_source_status() -> None:
     assert _source_status(SOURCES[SourceName.synthetic]) == "available"
-    assert _source_status(SOURCES[SourceName.lsl]) == "planned"
+    assert _source_status(SOURCES[SourceName.lsl]) == "available"
+    assert _source_status(SOURCES[SourceName.brainflow]) == "planned"
 
 
 @pytest.mark.parametrize("command", ["stream", "check-stream", "list-sources"])
@@ -98,7 +99,7 @@ def test_stream_replay_file_until_the_end(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        (["-s", "lsl"], "not available: planned"),
+        (["-s", "brainflow"], "not available: planned"),
         (["-s", "synthetic", "--montage", "Z"], "unknown montage"),
         (["-s", "synthetic", "--srate", "50"], "srate"),
         (["-s", "synthetic", "--line-freq", "55"], "line_freq_hz"),
