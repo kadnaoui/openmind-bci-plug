@@ -361,8 +361,8 @@ def _select_channels(raw: mne.io.BaseRaw, montage: Montage | None) -> tuple[list
         hint = (
             f"montages available with this recording: {usable}"
             if usable
-            else f"no named montage fits; use montage=None to keep all {len(eeg_names)} "
-            "EEG channels"
+            else f"no named montage fits; keep all {len(eeg_names)} EEG channels with "
+            "montage=None (in the CLI: omit --montage)"
         )
         raise MissingChannelsError(
             f"the recording lacks channels {missing} required by montage {montage.name!r}; " + hint

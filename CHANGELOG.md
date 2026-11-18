@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Source interface: `ChannelInfo`, `StreamInfo` (validated, immutable) and the
   `EEGSource` base class with context-manager support and output checks.
+- `openmind-plug stream` (synthetic with keyboard control, replay of datasets or
+  files) and `openmind-plug list-sources`.
 - LSL stream specification 1.0.0 (`docs/stream-spec.md`): `openmind-eeg`
   float32 stream in microvolts with XDF-style metadata (channels with 10-10
   locations, acquisition, reference, montage, `spec_version`) and the paired
