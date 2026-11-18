@@ -66,7 +66,7 @@ class _SourceEntry:
 SOURCES: dict[SourceName, _SourceEntry] = {
     SourceName.synthetic: _SourceEntry("Realistic synthetic EEG with keyboard-controlled state"),
     SourceName.replay: _SourceEntry(
-        "Public datasets (MOABB) or recorded files, in real time", "replay", "moabb"
+        "Recorded files (any MNE format) or public datasets, in real time"
     ),
     SourceName.lsl: _SourceEntry("Relay of a third-party LSL stream", planned=True),
     SourceName.brainflow: _SourceEntry("Any BrainFlow-supported board", "brainflow", planned=True),
@@ -93,7 +93,18 @@ def list_sources() -> None:
         color = typer.colors.GREEN if status == "available" else typer.colors.YELLOW
         typer.echo(f"{name.value:<{width}}  ", nl=False)
         typer.secho(f"{status:<10}", fg=color, nl=False)
-        typer.echo(f"  {entry.description}")
+        note = ""
+        if name is SourceName.replay and not _datasets_available():
+            note = f" (datasets need: {_REPLAY_INSTALL})"
+        typer.echo(f"  {entry.description}{note}")
+
+
+_REPLAY_INSTALL = 'pip install "openmind-plug[replay]"'
+
+
+def _datasets_available() -> bool:
+    """Whether MOABB, needed to download public datasets, is installed."""
+    return importlib.util.find_spec("moabb") is not None
 
 
 _SYNTH = "Synthetic source"
@@ -279,6 +290,8 @@ def _build_source(
             return ReplaySource.from_file(
                 file, montage=resolved, srate=srate, speed=speed, loop=loop
             )
+        if not _datasets_available():
+            _fail(f"replaying public datasets needs MOABB: {_REPLAY_INSTALL}")
         typer.echo(f"Loading {dataset} subject {subject} (downloaded on first use)...")
         return ReplaySource.from_dataset(
             str(dataset),
@@ -289,7 +302,7 @@ def _build_source(
             speed=speed,
             loop=loop,
         )
-    except (MissingChannelsError, KeyError, ValueError) as error:
+    except (MissingChannelsError, KeyError, ValueError, ImportError) as error:
         _fail(str(error.args[0]) if error.args else str(error))
 
 

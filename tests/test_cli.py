@@ -103,13 +103,33 @@ def test_stream_replay_file_until_the_end(tmp_path: Path) -> None:
         (["-s", "synthetic", "--srate", "50"], "srate"),
         (["-s", "synthetic", "--line-freq", "55"], "line_freq_hz"),
         (["-s", "replay"], "exactly one of --dataset or --file"),
-        (["-s", "replay", "--dataset", "nope"], "unknown dataset"),
     ],
 )
 def test_stream_reports_usage_errors(args: list[str], message: str) -> None:
     result = runner.invoke(app, ["stream", *args, "--no-keyboard"])
     assert result.exit_code == 2
     assert message in result.output
+
+
+def test_stream_replay_unknown_dataset() -> None:
+    pytest.importorskip("moabb")
+    result = runner.invoke(app, ["stream", "-s", "replay", "--dataset", "nope", "--no-keyboard"])
+    assert result.exit_code == 2
+    assert "unknown dataset" in result.output
+
+
+def test_stream_replay_dataset_without_moabb(monkeypatch: pytest.MonkeyPatch) -> None:
+    import openmind_plug.cli as cli
+
+    monkeypatch.setattr(cli, "_datasets_available", lambda: False)
+    result = runner.invoke(
+        app, ["stream", "-s", "replay", "--dataset", "bnci2014_001", "--no-keyboard"]
+    )
+    assert result.exit_code == 2
+    assert 'pip install "openmind-plug[replay]"' in result.output
+
+    listing = runner.invoke(app, ["list-sources"])
+    assert "datasets need" in listing.output
 
 
 def test_stream_replay_missing_channels(tmp_path: Path) -> None:
