@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Source interface: `ChannelInfo`, `StreamInfo` (validated, immutable) and the
+  `EEGSource` base class with context-manager support and output checks.
+- Montages: 10-10 electrode positions and named montages `A` (motor imagery,
+  default) and `B` (SSVEP variant). See `docs/sources.md`.
 - Package skeleton: `src/` layout, `openmind-plug` command, optional extras
   `replay`, `brainflow` and `ironbci`.
 - Tooling: ruff, strict mypy, pytest, pre-commit, GitHub Actions CI
