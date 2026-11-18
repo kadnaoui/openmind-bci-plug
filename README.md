@@ -57,14 +57,24 @@ uv run openmind-plug --help
 
 ## Quick start without a headset
 
-Once the synthetic source and the LSL output are available:
+Publish the synthetic source on LSL from Python:
+
+```python
+from openmind_plug.outlet import stream
+from openmind_plug.sources.synthetic import SyntheticSource
+
+stream(SyntheticSource(montage="A", seed=0))  # Ctrl+C to stop
+```
+
+In another terminal, check the stream:
 
 ```bash
-openmind-plug stream --source synthetic --montage A
+openmind-plug check-stream
 ```
 
 Any LSL consumer (OpenMind core, [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder),
-MNE-LSL...) can then pick up the `openmind-eeg` stream.
+MNE-LSL...) can then pick up the `openmind-eeg` stream, described in the
+[stream specification](docs/stream-spec.md). A `stream` command is coming to the CLI.
 
 ## Data and privacy
 

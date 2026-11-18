@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Source interface: `ChannelInfo`, `StreamInfo` (validated, immutable) and the
   `EEGSource` base class with context-manager support and output checks.
+- LSL stream specification 1.0.0 (`docs/stream-spec.md`): `openmind-eeg`
+  float32 stream in microvolts with XDF-style metadata (channels with 10-10
+  locations, acquisition, reference, montage, `spec_version`) and the paired
+  `openmind-markers` JSON stream.
+- `EEGOutlet` and `stream()` to publish any source, `EEGInlet` to consume the
+  standard stream, and `openmind-plug check-stream` to validate a live stream.
 - Replay source: real-time playback (optionally accelerated or looped) of public
   datasets `bnci2014_001` and `physionetmi` via MOABB, or of any file MNE reads;
   montage-based channel selection with explicit errors, microvolt conversion,
