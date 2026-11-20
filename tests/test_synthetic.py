@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import numpy as np
 import numpy.typing as npt
 import pytest
 from pydantic import ValidationError
-from scipy.signal import welch
+from scipy.signal import butter, sosfilt, welch
 
 from openmind_plug.montage import get_montage
 from openmind_plug.sources import EEGSource
@@ -199,6 +201,37 @@ def test_muscle_burst_adds_high_frequency_power() -> None:
     assert np.all(gain[lateral] > 3), gain
 
 
+@pytest.mark.parametrize("count", [1, 2])
+def test_jaw_clench_bursts_on_every_electrode(count: int) -> None:
+    source = SyntheticSource(montage="C", seed=0)
+    source.generate(2 * FS)
+    source.clench(count)
+    data = source.generate(2 * FS)
+    high = sosfilt(butter(4, 40, "highpass", fs=FS, output="sos"), data, axis=0)
+    # RMS over 50 ms, median over the electrodes: one value per sample.
+    window = np.ones(FS // 20) / (FS // 20)
+    rms = np.sqrt(np.convolve(np.median(high**2, axis=1), window, mode="same"))
+    active = rms > 5 * np.median(rms[int(1.4 * FS) :])  # the bursts are over after 1.2 s
+    rises = np.flatnonzero(np.diff(active.astype(int)) == 1) + 1
+    # A burst edge can cross the threshold several times: group rises 0.25 s apart.
+    onsets = [int(rises[0])] + [int(b) for a, b in pairwise(rises) if b - a > FS // 4]
+    assert len(onsets) == count
+    if count == 2:
+        assert 0.4 * FS <= onsets[1] - onsets[0] <= 0.65 * FS
+    # Every electrode sees the clench.
+    gain = np.mean(high[:FS] ** 2, axis=0) / np.mean(high[int(1.4 * FS) :] ** 2, axis=0)
+    assert np.all(gain > 5), gain
+    markers = [m.payload for m in source.read_markers() if m.payload["type"] == "artifact"]
+    assert markers == [
+        {"type": "artifact", "label": "jaw_clench", "count": count, "source": "synthetic"}
+    ]
+
+
+def test_clench_rejects_other_counts() -> None:
+    with pytest.raises(ValueError, match="1 or 2"):
+        SyntheticSource().clench(3)
+
+
 def test_line_noise_peak() -> None:
     config = SyntheticConfig(line_noise_uv=10, line_freq_hz=60)
     samples = SyntheticSource(seed=0, srate=500, config=config).generate(20 * 500)
@@ -300,7 +333,7 @@ def test_restart_continues_the_timeline() -> None:
 
 def test_handle_key_maps_bindings() -> None:
     source = SyntheticSource(seed=0)
-    assert set(KEY_BINDINGS) == {"r", "a", "d", "s", "e", "b"}
+    assert set(KEY_BINDINGS) == {"r", "a", "d", "s", "e", "b", "j"}
     for key, state in zip("adsr", ("left", "right", "feet", "rest"), strict=True):
         assert source.handle_key(key)
         assert source.state == state
@@ -309,5 +342,6 @@ def test_handle_key_maps_bindings() -> None:
     assert source.handle_key("e")
     assert source.eyes == "open"
     assert source.handle_key("b")
+    assert source.handle_key("j")
     assert not source.handle_key("x")
     assert set(STATES) == {"rest", "left", "right", "feet"}

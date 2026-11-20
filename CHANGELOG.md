@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Montage `C` (`FC3, FC4, C3, Cz, C4, CP3, CP4, CPz`): eight motor electrodes,
+  without Fp1, planned for the IronBCI-8. Montage `A` stays the default.
+- LSL stream specification 1.1.0: montage name `C` and the `jaw_clench`
+  artifact marker (with `count`). Additive: 1.0 consumers keep working.
+- Synthetic jaw clench, single or double (`clench()`, key `j`, `clench_uv`),
+  to test the `action` gesture of OpenMind Core without a headset.
+- Note on the alpha test with motor montages (no posterior electrode).
 - Source interface: `ChannelInfo`, `StreamInfo` (validated, immutable) and the
   `EEGSource` base class with context-manager support and output checks.
 - Guides: getting started without a headset, adding a driver; examples

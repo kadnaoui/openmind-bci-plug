@@ -29,6 +29,7 @@ In this terminal, single keys change what the simulated user does:
 | `r` | back to **rest** |
 | `e` | close / open the eyes: alpha rises at the back of the head |
 | `b` | blink: large slow wave on Fp1 |
+| `j` | double jaw clench: two short muscle bursts on every electrode |
 | `q` | quit |
 
 ## 3. Check the stream (1 min)

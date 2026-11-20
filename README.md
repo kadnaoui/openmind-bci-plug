@@ -59,7 +59,7 @@ uv run openmind-plug --help
 ## Quick start without a headset
 
 Stream the synthetic source, controlled from the keyboard
-(`a` left, `d` right, `s` feet, `r` rest, `e` eyes, `b` blink, `q` quit):
+(`a` left, `d` right, `s` feet, `r` rest, `e` eyes, `b` blink, `j` jaw clench, `q` quit):
 
 ```bash
 openmind-plug stream --source synthetic --montage A

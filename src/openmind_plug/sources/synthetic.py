@@ -11,7 +11,10 @@ The signal of each channel, in microvolts, is the sum of:
     (C4) sensorimotor cortex;
 
 - optional **artifacts**: eye blinks (slow, large, frontal), muscle bursts (broadband
-  high frequency, lateral) and power-line noise (50 or 60 Hz).
+  high frequency, lateral) and power-line noise (50 or 60 Hz);
+- **jaw clenches** on demand (:meth:`SyntheticSource.clench`): short, strong bursts of
+  muscle activity on every electrode, single or double, the gesture behind the
+  ``action`` command.
 
 **Event-related desynchronization (ERD).** Imagining a movement lowers the mu and
 beta power over the opposite hemisphere. The current state drives this:
@@ -60,6 +63,7 @@ KEY_BINDINGS: Final[dict[str, str]] = {
     "s": "state: feet",
     "e": "toggle eyes open / closed",
     "b": "trigger a blink",
+    "j": "trigger a double jaw clench",
 }
 
 #: Lowest sampling rate supported: beta (up to 30 Hz) and muscle artifacts need headroom.
@@ -74,6 +78,8 @@ _SPATIAL_SIGMA_M: Final = 0.025  # spread of a rhythm generator around its centr
 _BLINK_SIGMA_M: Final = 0.03  # spread of blinks around Fp1/Fp2
 _ENVELOPE_TAU_S: Final = 0.5  # time constant of the amplitude fluctuations
 _ENVELOPE_DEPTH: Final = 0.3  # relative standard deviation of the amplitude
+_CLENCH_S: Final = (0.25, 0.45)  # duration of one clench burst
+_CLENCH_GAP_S: Final = (0.45, 0.6)  # onset-to-onset interval of a double clench
 
 
 class SyntheticConfig(BaseModel):
@@ -96,6 +102,9 @@ class SyntheticConfig(BaseModel):
     blink_uv: float = Field(default=120.0, ge=0)
     muscle_rate_per_min: float = Field(default=0.0, ge=0)
     muscle_uv: float = Field(default=20.0, ge=0, description="RMS during a burst.")
+    # 80 µV puts a clench about 20 dB above the default background above 30 Hz,
+    # close to the deliberate clenches of public recordings (about 26 dB).
+    clench_uv: float = Field(default=80.0, ge=0, description="RMS during a jaw clench.")
     line_noise_uv: float = Field(default=0.0, ge=0)
     line_freq_hz: Literal[50, 60] = 50
 
@@ -200,6 +209,9 @@ class SyntheticSource(EEGSource):
         self._blink_weights = np.exp(-(dist**2) / (2 * _BLINK_SIGMA_M**2))
         self._muscle_weights = 0.3 + 0.7 * np.clip(np.abs(positions[:, 0]) / 0.085, 0, 1)
         self._muscle_sos = signal.butter(4, 30.0, btype="highpass", fs=srate, output="sos")
+        # Jaw muscles (masseter, temporalis) reach every scalp electrode, more so the
+        # lateral ones.
+        self._clench_weights = 0.6 + 0.4 * np.clip(np.abs(positions[:, 0]) / 0.085, 0, 1)
 
         self._state: State = "rest"
         self._eyes: Eyes = "open"
@@ -255,6 +267,21 @@ class SyntheticSource(EEGSource):
         with self._lock:
             self._add_blink(self._produced)
 
+    def clench(self, count: int = 2) -> None:
+        """Trigger a jaw clench (``count=1``) or a double clench at the next sample.
+
+        Each clench is a 0.25-0.45 s burst of muscle activity above 30 Hz on every
+        electrode; the two clenches of a double clench start 0.45-0.6 s apart. A
+        ``jaw_clench`` artifact marker with the ``count`` marks the first one.
+
+        Raises:
+            ValueError: If ``count`` is not 1 or 2.
+        """
+        if count not in (1, 2):
+            raise ValueError(f"count must be 1 or 2, got {count}")
+        with self._lock:
+            self._add_clench(self._produced, count)
+
     def handle_key(self, key: str) -> bool:
         """Apply a keyboard command from :data:`KEY_BINDINGS`.
 
@@ -269,6 +296,8 @@ class SyntheticSource(EEGSource):
             self.set_eyes("closed" if self._eyes == "open" else "open")
         elif key == "b":
             self.blink()
+        elif key == "j":
+            self.clench(2)
         else:
             return False
         return True
@@ -466,6 +495,21 @@ class SyntheticSource(EEGSource):
         waveform = self.config.muscle_uv * noise * taper[:, None] * self._muscle_weights[None, :]
         self._events.append(_Event(start, waveform))
         self._marker({"type": "artifact", "label": "muscle"}, index=start)
+
+    def _add_clench(self, start: int, count: int) -> None:
+        rng, srate = self._rng_shapes, self._info.srate
+        onset = start
+        for _ in range(count):
+            length = max(int(rng.uniform(*_CLENCH_S) * srate), 8)
+            white = rng.standard_normal((length, len(self._clench_weights)))
+            noise = signal.sosfilt(self._muscle_sos, white, axis=0)
+            noise /= np.std(noise, axis=0, keepdims=True) + 1e-12
+            taper = signal.windows.tukey(length, alpha=0.3)
+            amplitude = self.config.clench_uv * rng.uniform(0.8, 1.2)
+            waveform = amplitude * noise * taper[:, None] * self._clench_weights[None, :]
+            self._events.append(_Event(onset, waveform))
+            onset += int(rng.uniform(*_CLENCH_GAP_S) * srate)
+        self._marker({"type": "artifact", "label": "jaw_clench", "count": count}, index=start)
 
     def _marker(self, payload: dict[str, Any], index: int | None = None) -> None:
         """Queue a marker for the sample at ``index`` (default: the next sample)."""

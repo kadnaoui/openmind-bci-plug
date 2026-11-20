@@ -40,6 +40,14 @@ Closing the eyes raises the alpha rhythm (8-12 Hz) over the back of the head
 channel and **passes when the best channel rises at least ×2**. With the synthetic
 source, press `e` in the `stream` terminal when the second phase starts.
 
+**Montages without posterior electrodes.** The motor montages `A` and `C` have
+no occipital or parietal electrode. On a real head, alpha also spreads to the
+central-parietal sites (`CP3`, `CP4`, `CPz`), but its rise there is weaker and may
+stay below ×2; the synthetic source models alpha over the back of the head only,
+so with `A` or `C` its test does not pass (about ×1.2 to ×1.3). To check a
+headset, run the test with montage `B` (`O1`, `O2`), or move one electrode to
+`Pz` or `O1` for the test.
+
 Phases shorter than 20 s give unreliable results: on the best of 8 channels,
 chance alone can reach ×1.5 with 30 s phases and ×3 with 6 s phases.
 
