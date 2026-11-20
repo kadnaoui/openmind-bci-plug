@@ -126,7 +126,7 @@ def stream_command(
         typer.Option(
             "--montage",
             "-m",
-            help="Montage (A, B). Default: A for synthetic, every EEG channel for replay.",
+            help="Montage (A, B, C). Default: A for synthetic, every EEG channel for replay.",
             show_default=False,
         ),
     ] = None,

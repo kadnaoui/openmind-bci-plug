@@ -28,6 +28,7 @@ from openmind_plug.recorder import (
 from openmind_plug.sources import ChannelInfo, Marker, StreamInfo
 from openmind_plug.sources.replay import ReplaySource
 from openmind_plug.sources.synthetic import SyntheticConfig, SyntheticSource
+from openmind_plug.spec import SPEC_VERSION
 
 FS = 250.0
 runner = CliRunner()
@@ -118,7 +119,7 @@ def test_file_metadata(tmp_path: Path) -> None:
     metadata = json.loads(raw.info["description"])["openmind"]
     assert metadata["reference"] == "Cz"
     assert metadata["model"] == "test"
-    assert metadata["spec_version"] == "1.0.0"
+    assert metadata["spec_version"] == SPEC_VERSION
     assert "channels" not in metadata
     np.testing.assert_allclose(raw.get_data()[0], 20e-6)  # stored in volts
     positions = raw.get_montage().get_positions()["ch_pos"]  # type: ignore[union-attr]

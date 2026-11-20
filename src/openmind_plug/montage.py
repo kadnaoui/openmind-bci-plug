@@ -162,8 +162,17 @@ MONTAGE_B = Montage(
     description="SSVEP variant: occipital O1/O2 instead of FC3/FC4.",
 )
 
+MONTAGE_C = Montage(
+    name="C",
+    labels=("FC3", "FC4", "C3", "Cz", "C4", "CP3", "CP4", "CPz"),
+    description=(
+        "Motor imagery on eight motor electrodes (CPz for the feet area); the jaw "
+        "clench used for the action command is read on the same electrodes."
+    ),
+)
+
 #: Named montages, by name.
-MONTAGES: dict[str, Montage] = {m.name: m for m in (MONTAGE_A, MONTAGE_B)}
+MONTAGES: dict[str, Montage] = {m.name: m for m in (MONTAGE_A, MONTAGE_B, MONTAGE_C)}
 
 #: Name of the montage used when none is given.
 DEFAULT_MONTAGE = "A"

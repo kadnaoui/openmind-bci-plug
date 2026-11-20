@@ -33,8 +33,13 @@ def test_get_montage_is_case_insensitive(name: str) -> None:
     assert get_montage(name) is MONTAGES[name.strip().upper()]
 
 
+def test_montage_c_has_eight_motor_electrodes() -> None:
+    assert MONTAGES["C"].labels == ("FC3", "FC4", "C3", "Cz", "C4", "CP3", "CP4", "CPz")
+    assert "Fp1" not in MONTAGES["C"].labels
+
+
 def test_get_montage_unknown_lists_available() -> None:
-    with pytest.raises(KeyError, match=r"available montages: \['A', 'B'\]"):
+    with pytest.raises(KeyError, match=r"available montages: \['A', 'B', 'C'\]"):
         get_montage("Z")
 
 

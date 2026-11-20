@@ -18,7 +18,7 @@ from openmind_plug.montage import POSITIONS_10_10
 from openmind_plug.sources.base import KNOWN_CHANNEL_TYPES, ChannelInfo, StreamInfo
 
 #: Version of the specification implemented by this module.
-SPEC_VERSION: Final = "1.0.0"
+SPEC_VERSION: Final = "1.1.0"
 
 EEG_STREAM_NAME: Final = "openmind-eeg"
 EEG_STREAM_TYPE: Final = "EEG"

@@ -1,6 +1,6 @@
 # OpenMind LSL stream specification
 
-**Version 1.0.0**
+**Version 1.1.0**
 
 This document is the contract between producers of EEG streams (OpenMind Plug,
 or any third-party tool) and their consumers (OpenMind Core, Sandbox, recorders,
@@ -48,7 +48,7 @@ A producer publishes **two LSL streams**: the EEG stream and the markers stream.
 
 ```xml
 <desc>
-  <spec_version>1.0.0</spec_version>
+  <spec_version>1.1.0</spec_version>
   <channels>
     <channel>
       <label>C3</label>
@@ -84,7 +84,7 @@ A producer publishes **two LSL streams**: the EEG stream and the markers stream.
 | `acquisition/manufacturer`, `model`, `driver` | **MUST** be present (`unknown` if not known). `driver` names the producer's driver. |
 | `acquisition/software`, `software_version` | **SHOULD** name the producing software and its version. |
 | `reference` | **MUST** be present: reference electrode or scheme (`Cz`, `average`, `left mastoid`, `none`, `unknown`). |
-| `montage` | **MUST** be present: montage name (`A`, `B`), or empty if the channels do not follow a named montage. |
+| `montage` | **MUST** be present: montage name (`A`, `B`, `C`), or empty if the channels do not follow a named montage. |
 
 Consumers **MUST** ignore unknown elements, so minor versions can add fields.
 
@@ -113,7 +113,7 @@ Each sample is **one JSON object**, serialized as a compact UTF-8 string. It
 | `cue` | `label`, `trial` (int, from 1) | `{"type":"cue","label":"left","trial":12,"source":"replay"}` |
 | `state` | `label` (`rest`, `left`, `right`, `feet`) | `{"type":"state","label":"left","source":"synthetic"}` |
 | `eyes` | `label` (`open`, `closed`) | `{"type":"eyes","label":"closed","source":"synthetic"}` |
-| `artifact` | `label` (`blink`, `muscle`...) | `{"type":"artifact","label":"blink","source":"synthetic"}` |
+| `artifact` | `label` (`blink`, `muscle`, `jaw_clench`...); for `jaw_clench`, `count` (int, number of clenches: 1 or 2) | `{"type":"artifact","label":"jaw_clench","count":2,"source":"synthetic"}` |
 
 - `source` **SHOULD** name the producer of the marker (`synthetic`, `replay`,
   `sandbox`...).
@@ -134,3 +134,4 @@ This specification follows [Semantic Versioning](https://semver.org):
 | Version | Date | Changes |
 |---|---|---|
 | 1.0.0 | 2026-11-18 | First version. |
+| 1.1.0 | 2026-11-20 | Montage `C` (eight motor electrodes); `jaw_clench` artifact marker with `count`. |
