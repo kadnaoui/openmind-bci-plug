@@ -78,8 +78,10 @@ _SPATIAL_SIGMA_M: Final = 0.025  # spread of a rhythm generator around its centr
 _BLINK_SIGMA_M: Final = 0.03  # spread of blinks around Fp1/Fp2
 _ENVELOPE_TAU_S: Final = 0.5  # time constant of the amplitude fluctuations
 _ENVELOPE_DEPTH: Final = 0.3  # relative standard deviation of the amplitude
-_CLENCH_S: Final = (0.25, 0.45)  # duration of one clench burst
-_CLENCH_GAP_S: Final = (0.45, 0.6)  # onset-to-onset interval of a double clench
+_CLENCH_S: Final = (0.2, 0.35)  # duration of one clench burst
+# Onset-to-onset interval of a double clench: always leaves a release of at least
+# 0.2 s between the two bursts, as the gesture requires.
+_CLENCH_GAP_S: Final = (0.55, 0.7)
 
 
 class SyntheticConfig(BaseModel):
@@ -102,9 +104,9 @@ class SyntheticConfig(BaseModel):
     blink_uv: float = Field(default=120.0, ge=0)
     muscle_rate_per_min: float = Field(default=0.0, ge=0)
     muscle_uv: float = Field(default=20.0, ge=0, description="RMS during a burst.")
-    # 80 µV puts a clench about 20 dB above the default background above 30 Hz,
-    # close to the deliberate clenches of public recordings (about 26 dB).
-    clench_uv: float = Field(default=80.0, ge=0, description="RMS during a jaw clench.")
+    # 120 µV puts a clench about 26 dB above the default background above 30 Hz,
+    # like the deliberate clenches of public recordings.
+    clench_uv: float = Field(default=120.0, ge=0, description="RMS during a jaw clench.")
     line_noise_uv: float = Field(default=0.0, ge=0)
     line_freq_hz: Literal[50, 60] = 50
 
@@ -270,8 +272,9 @@ class SyntheticSource(EEGSource):
     def clench(self, count: int = 2) -> None:
         """Trigger a jaw clench (``count=1``) or a double clench at the next sample.
 
-        Each clench is a 0.25-0.45 s burst of muscle activity above 30 Hz on every
-        electrode; the two clenches of a double clench start 0.45-0.6 s apart. A
+        Each clench is a 0.2-0.35 s burst of muscle activity above 30 Hz on every
+        electrode; the two clenches of a double clench start 0.55-0.7 s apart, with
+        a release of at least 0.2 s between them. A
         ``jaw_clench`` artifact marker with the ``count`` marks the first one.
 
         Raises:
