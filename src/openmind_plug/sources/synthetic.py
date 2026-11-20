@@ -78,10 +78,10 @@ _SPATIAL_SIGMA_M: Final = 0.025  # spread of a rhythm generator around its centr
 _BLINK_SIGMA_M: Final = 0.03  # spread of blinks around Fp1/Fp2
 _ENVELOPE_TAU_S: Final = 0.5  # time constant of the amplitude fluctuations
 _ENVELOPE_DEPTH: Final = 0.3  # relative standard deviation of the amplitude
-_CLENCH_S: Final = (0.2, 0.35)  # duration of one clench burst
+_CLENCH_S: Final = (0.2, 0.3)  # duration of one clench burst
 # Onset-to-onset interval of a double clench: always leaves a release of at least
-# 0.2 s between the two bursts, as the gesture requires.
-_CLENCH_GAP_S: Final = (0.55, 0.7)
+# 0.3 s between the two bursts, as the gesture requires.
+_CLENCH_GAP_S: Final = (0.6, 0.75)
 
 
 class SyntheticConfig(BaseModel):
@@ -272,9 +272,9 @@ class SyntheticSource(EEGSource):
     def clench(self, count: int = 2) -> None:
         """Trigger a jaw clench (``count=1``) or a double clench at the next sample.
 
-        Each clench is a 0.2-0.35 s burst of muscle activity above 30 Hz on every
-        electrode; the two clenches of a double clench start 0.55-0.7 s apart, with
-        a release of at least 0.2 s between them. A
+        Each clench is a 0.2-0.3 s burst of muscle activity above 30 Hz on every
+        electrode; the two clenches of a double clench start 0.6-0.75 s apart, with
+        a release of at least 0.3 s between them. A
         ``jaw_clench`` artifact marker with the ``count`` marks the first one.
 
         Raises:

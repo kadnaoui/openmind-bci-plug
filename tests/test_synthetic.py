@@ -217,7 +217,7 @@ def test_jaw_clench_bursts_on_every_electrode(count: int) -> None:
     onsets = [int(rises[0])] + [int(b) for a, b in pairwise(rises) if b - a > FS // 4]
     assert len(onsets) == count
     if count == 2:
-        assert 0.5 * FS <= onsets[1] - onsets[0] <= 0.75 * FS
+        assert 0.55 * FS <= onsets[1] - onsets[0] <= 0.8 * FS
     # Every electrode sees the clench.
     gain = np.mean(high[:FS] ** 2, axis=0) / np.mean(high[int(1.4 * FS) :] ** 2, axis=0)
     assert np.all(gain > 5), gain

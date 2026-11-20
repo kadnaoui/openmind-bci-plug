@@ -175,7 +175,7 @@ raises posterior alpha the same way.
 |---|---|---|
 | Blink | Hann pulse of 0.25-0.4 s, strongest on Fp1/Fp2 (σ = 3 cm) | `blink_rate_per_min`, `blink_uv` (120), or `blink()` / key `b` |
 | Muscle | Burst of 0.5-1.5 s of noise above 30 Hz, stronger on lateral channels | `muscle_rate_per_min`, `muscle_uv` (20 µV RMS) |
-| Jaw clench | On demand only: burst of 0.2-0.35 s of noise above 30 Hz on every electrode (stronger laterally); a double clench is two bursts 0.55-0.7 s apart, with a release of at least 0.2 s | `clench(count=2)` / key `j`, `clench_uv` (120 µV RMS) |
+| Jaw clench | On demand only: burst of 0.2-0.3 s of noise above 30 Hz on every electrode (stronger laterally); a double clench is two bursts 0.6-0.75 s apart, with a release of at least 0.3 s | `clench(count=2)` / key `j`, `clench_uv` (120 µV RMS) |
 | Power line | Sinusoid with a per-channel gain | `line_noise_uv`, `line_freq_hz` (50 or 60) |
 
 ```python
