@@ -93,7 +93,7 @@ def test_markers_round_trip() -> None:
     source_id = unique_id()
     with (
         EEGOutlet(INFO, source_id=source_id) as outlet,
-        EEGInlet(timeout=5, source_id=source_id) as inlet,
+        EEGInlet(timeout=5, source_id=source_id, markers_from=[f"{source_id}:markers"]) as inlet,
     ):
         time.sleep(0.5)  # let the markers inlet connect
         now = pylsl.local_clock()
@@ -108,6 +108,85 @@ def test_markers_round_trip() -> None:
             received += inlet.read_markers(timeout=0.2)
     assert [m.payload for m in received] == [m.payload for m in sent]
     assert received[0].timestamp == pytest.approx(now, abs=1e-3)
+
+
+def markers_outlet(source_id: str, valid: bool = True) -> pylsl.StreamOutlet:
+    """A markers stream of another program, such as the Sandbox bridge."""
+    info = pylsl.StreamInfo(
+        name="openmind-markers",
+        type="Markers",
+        channel_count=1 if valid else 2,
+        nominal_srate=pylsl.IRREGULAR_RATE,
+        channel_format=pylsl.cf_string,
+        source_id=source_id,
+    )
+    info.desc().append_child_value("spec_version", "1.2.0")
+    return pylsl.StreamOutlet(info)
+
+
+def collect(inlet: EEGInlet, n: int, timeout: float = 5.0) -> list[Marker]:
+    received: list[Marker] = []
+    deadline = time.monotonic() + timeout
+    while len(received) < n and time.monotonic() < deadline:
+        received += inlet.read_markers(timeout=0.2)
+    return received
+
+
+def test_markers_of_several_producers_are_merged_in_time_order() -> None:
+    source_id = unique_id()
+    sandbox_id = f"openmind-sandbox:{uuid.uuid4()}:markers"
+    with (
+        EEGOutlet(INFO, source_id=source_id) as outlet,
+        EEGInlet(
+            timeout=5,
+            source_id=source_id,
+            markers_from=[f"{source_id}:markers", sandbox_id],
+            rescan_s=0.2,
+        ) as inlet,
+    ):
+        # The Sandbox bridge starts after the consumer: it must still be found.
+        sandbox = markers_outlet(sandbox_id)
+        deadline = time.monotonic() + 5
+        while sandbox_id not in inlet.marker_sources and time.monotonic() < deadline:
+            inlet.read_markers(timeout=0.2)
+        assert sorted(inlet.marker_sources) == sorted([f"{source_id}:markers", sandbox_id])
+        time.sleep(0.3)
+        now = pylsl.local_clock()
+        sandbox.push_sample(['{"type":"trial_start","trial":1,"source":"sandbox"}'], now)
+        sandbox.push_sample(
+            ['{"type":"cue","label":"left","trial":1,"source":"sandbox"}'], now + 0.2
+        )
+        outlet.push_markers([Marker(now + 0.1, {"type": "state", "label": "left"})])
+        received = collect(inlet, 3)
+    assert [m.payload["type"] for m in received] == ["trial_start", "state", "cue"]
+    assert [m.timestamp for m in received] == sorted(m.timestamp for m in received)
+
+
+def test_markers_from_ignores_other_producers() -> None:
+    source_id = unique_id()
+    other = markers_outlet(f"openmind-sandbox:{uuid.uuid4()}:markers")
+    with (
+        EEGOutlet(INFO, source_id=source_id),
+        EEGInlet(timeout=5, source_id=source_id, markers_from=[], rescan_s=0.1) as inlet,
+    ):
+        time.sleep(0.5)
+        other.push_sample(['{"type":"cue","label":"left"}'])
+        assert collect(inlet, 1, timeout=1.0) == []
+        assert not inlet.has_markers
+
+
+def test_markers_stream_breaking_the_specification_is_ignored() -> None:
+    source_id = unique_id()
+    bad_id = f"openmind-sandbox:{uuid.uuid4()}:markers"
+    bad = markers_outlet(bad_id, valid=False)
+    with (
+        EEGOutlet(INFO, source_id=source_id),
+        EEGInlet(timeout=5, source_id=source_id, markers_from=[bad_id], rescan_s=0.1) as inlet,
+    ):
+        time.sleep(0.5)
+        inlet.read_markers()
+        assert bad_id not in inlet.marker_sources
+    del bad
 
 
 def test_outlet_converts_units_to_microvolts() -> None:
@@ -136,7 +215,10 @@ def test_closed_outlet_rejects_pushes() -> None:
 def test_stream_publishes_synthetic_source_with_markers() -> None:
     source_id = unique_id()
     source = SyntheticSource(seed=0)
-    with streaming(source, source_id), EEGInlet(timeout=5, source_id=source_id) as inlet:
+    with (
+        streaming(source, source_id),
+        EEGInlet(timeout=5, source_id=source_id, markers_from=[f"{source_id}:markers"]) as inlet,
+    ):
         time.sleep(0.3)
         source.set_state("left")
         samples, stamps = read_until(inlet, 300)

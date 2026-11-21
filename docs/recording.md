@@ -1,7 +1,10 @@
 # Recording
 
 `openmind-plug record` saves the standard LSL stream (EEG and markers) to a FIF
-file that MNE, EEGLAB-compatible tools and `ReplaySource` can read.
+file that MNE, EEGLAB-compatible tools and `ReplaySource` can read. Markers come
+from **every** `openmind-markers` stream, including those of other programs that
+start during the recording, such as the calibration scenes of OpenMind Sandbox
+(`trial_start/1`, `cue/left`, `trial_end/1`, `event/block_start`...).
 
 > [!IMPORTANT]
 > EEG recordings are **health data**. Subjects are identified only by a pseudonym

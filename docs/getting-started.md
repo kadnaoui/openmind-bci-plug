@@ -20,6 +20,8 @@ uv run openmind-plug stream --source synthetic --montage A
 
 You now publish `openmind-eeg`: 8 channels (FC3, FC4, C3, Cz, C4, CP3, CP4, Fp1)
 at 250 Hz, in microvolts, plus an `openmind-markers` stream. Leave it running.
+(Other programs, such as the calibration scenes of OpenMind Sandbox, may publish
+`openmind-markers` streams too: consumers read and merge all of them.)
 In this terminal, single keys change what the simulated user does:
 
 | Key | Effect |

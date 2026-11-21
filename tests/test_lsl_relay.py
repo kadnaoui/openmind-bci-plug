@@ -190,7 +190,7 @@ def test_relay_end_to_end_converts_to_microvolts() -> None:
         )
         thread.start()
         try:
-            with EEGInlet(timeout=5, source_id=relay_id) as inlet:
+            with EEGInlet(timeout=5, source_id=relay_id, with_markers=False) as inlet:
                 assert inlet.info.labels == ("FC3", "Cz", "C4", "AUX")
                 received = np.empty((0, 4), dtype=np.float32)
                 deadline = time.monotonic() + 5

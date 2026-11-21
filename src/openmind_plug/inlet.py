@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import math
+import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Self
@@ -26,6 +28,7 @@ from openmind_plug.sources.base import Marker, SampleArray, StreamInfo, Timestam
 from openmind_plug.spec import (
     EEG_STREAM_NAME,
     EEG_STREAM_TYPE,
+    MARKERS_STREAM_NAME,
     check_eeg_info,
     check_markers_info,
     parse_eeg_info,
@@ -69,15 +72,23 @@ def resolve_markers_stream(eeg_source_id: str, timeout: float = 1.0) -> pylsl.St
 
 
 class EEGInlet:
-    """Read the standard EEG stream and its markers stream.
+    """Read the standard EEG stream and every markers stream.
 
     Timestamps are converted to the local LSL clock (``proc_clocksync``), so they can
     be compared with ``pylsl.local_clock()`` and with markers from other machines.
 
+    Markers come from **every** ``openmind-markers`` stream (specification 2.3):
+    the stream paired with the EEG stream, and those of other programs, such as
+    the calibration scenes of OpenMind Sandbox. Streams that appear later are
+    picked up while reading, and markers are merged by timestamp.
+
     Args:
         timeout: Seconds to wait for the streams.
-        source_id: Pick a specific producer when several run.
-        with_markers: Also connect to the paired markers stream, if present.
+        source_id: Pick a specific EEG producer when several run.
+        with_markers: Also read markers streams.
+        markers_from: Accept only markers streams with these ``source_id``
+            values; by default, every ``openmind-markers`` stream.
+        rescan_s: Seconds between two searches for new markers streams.
         max_buflen: Seconds of data buffered by LSL if reads fall behind.
 
     Raises:
@@ -90,6 +101,8 @@ class EEGInlet:
         timeout: float = 5.0,
         source_id: str | None = None,
         with_markers: bool = True,
+        markers_from: Sequence[str] | None = None,
+        rescan_s: float = 2.0,
         max_buflen: int = 360,
     ) -> None:
         resolved = resolve_eeg_stream(timeout, source_id)
@@ -100,17 +113,32 @@ class EEGInlet:
         self.source_id: str = self.lsl_info.source_id()
         self._eeg.open_stream(timeout)
 
-        self._markers: pylsl.StreamInlet | None = None
+        self._flags = flags
+        self._max_buflen = max_buflen
+        self._markers: dict[str, pylsl.StreamInlet] = {}  # by stream uid
+        self._marker_sources: dict[str, str] = {}  # uid -> source_id
+        self._ignored: set[str] = set()  # uids of streams breaking the specification
+        self._accepted = None if markers_from is None else set(markers_from)
+        self._rescan_s = rescan_s
+        self._last_scan = -math.inf
+        self._resolver: pylsl.ContinuousResolver | None = None
         if with_markers:
-            markers_info = resolve_markers_stream(self.source_id, timeout=min(timeout, 2.0))
-            if markers_info is not None:
-                self._markers = pylsl.StreamInlet(markers_info, max_buflen, processing_flags=flags)
-                self._markers.open_stream(timeout)
+            self._resolver = pylsl.ContinuousResolver(prop="name", value=MARKERS_STREAM_NAME)
+            # Wait a little for the paired stream, which normally starts with the EEG one.
+            paired = resolve_markers_stream(self.source_id, timeout=min(timeout, 2.0))
+            if paired is not None and self._accepts(paired.source_id()):
+                self._connect(paired, timeout)
+            self._scan()
 
     @property
     def has_markers(self) -> bool:
-        """Whether the paired markers stream was found."""
-        return self._markers is not None
+        """Whether at least one markers stream is connected."""
+        return bool(self._markers)
+
+    @property
+    def marker_sources(self) -> list[str]:
+        """``source_id`` of every connected markers stream."""
+        return sorted(self._marker_sources.values())
 
     def read(
         self, max_samples: int = 1024, timeout: float = 0.0
@@ -130,28 +158,67 @@ class EEGInlet:
         return samples, np.asarray(stamps, dtype=np.float64)
 
     def read_markers(self, timeout: float = 0.0) -> list[Marker]:
-        """Return the markers received so far. Invalid JSON samples are skipped."""
-        if self._markers is None:
-            return []
-        data, stamps = self._markers.pull_chunk(timeout=timeout)
+        """Return the markers received so far from every stream, in time order.
+
+        New markers streams are looked for every ``rescan_s`` seconds. Invalid
+        JSON samples are skipped.
+        """
+        if self._resolver is not None and time.monotonic() - self._last_scan >= self._rescan_s:
+            self._scan()
         markers: list[Marker] = []
-        for (text,), timestamp in zip(data, stamps, strict=True):
-            try:
-                payload = json.loads(text)
-            except json.JSONDecodeError:
-                logger.warning("skipping marker that is not valid JSON: %r", text)
-                continue
-            if not isinstance(payload, dict) or not isinstance(payload.get("type"), str):
-                logger.warning("skipping marker without a string 'type': %r", text)
-                continue
-            markers.append(Marker(float(timestamp), payload))
-        return markers
+        for index, inlet in enumerate(list(self._markers.values())):
+            data, stamps = inlet.pull_chunk(timeout=timeout if index == 0 else 0.0)
+            for (text,), timestamp in zip(data, stamps, strict=True):
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError:
+                    logger.warning("skipping marker that is not valid JSON: %r", text)
+                    continue
+                if not isinstance(payload, dict) or not isinstance(payload.get("type"), str):
+                    logger.warning("skipping marker without a string 'type': %r", text)
+                    continue
+                markers.append(Marker(float(timestamp), payload))
+        return sorted(markers, key=lambda marker: marker.timestamp)
 
     def close(self) -> None:
         """Disconnect from the streams."""
         self._eeg.close_stream()
-        if self._markers is not None:
-            self._markers.close_stream()
+        for inlet in self._markers.values():
+            inlet.close_stream()
+        self._markers.clear()
+
+    # -- markers streams ---------------------------------------------------------
+
+    def _accepts(self, source_id: str) -> bool:
+        return self._accepted is None or source_id in self._accepted
+
+    def _scan(self) -> None:
+        """Connect to markers streams that appeared since the last scan."""
+        self._last_scan = time.monotonic()
+        assert self._resolver is not None
+        for info in self._resolver.results():
+            uid = info.uid()
+            if uid in self._markers or uid in self._ignored:
+                continue
+            if self._accepts(info.source_id()):
+                self._connect(info, timeout=1.0)
+
+    def _connect(self, info: pylsl.StreamInfo, timeout: float) -> None:
+        inlet = pylsl.StreamInlet(info, self._max_buflen, processing_flags=self._flags)
+        try:
+            # Resolved headers lack the description: check the full one.
+            problems = check_markers_info(inlet.info(timeout))
+            if problems:
+                logger.warning("ignoring markers stream %s: %s", info.source_id(), problems)
+                self._ignored.add(info.uid())
+                return
+            inlet.open_stream(timeout)
+        except TimeoutError:  # pragma: no cover - depends on the network
+            logger.warning("markers stream %s did not open; retrying later", info.source_id())
+            return
+        self._markers[info.uid()] = inlet
+        self._marker_sources[info.uid()] = info.source_id()
+        logger.info("reading markers from %s", info.source_id())
 
     def __enter__(self) -> Self:
         return self

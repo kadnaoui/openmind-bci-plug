@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- LSL stream specification 1.2.0: marker types `trial_start`, `trial_end` and
+  `event` (from the OpenMind protocol), and several `openmind-markers` streams
+  at once (section 2.3). Additive: 1.x consumers keep working.
+- `EEGInlet` reads every `openmind-markers` stream, including streams that
+  appear later, and merges their markers by timestamp; `markers_from` restricts
+  the accepted producers, `marker_sources` lists them. The recorder therefore
+  keeps the calibration markers of OpenMind Sandbox.
 - Montage `C` (`FC3, FC4, C3, Cz, C4, CP3, CP4, CPz`): eight motor electrodes,
   without Fp1, planned for the IronBCI-8. Montage `A` stays the default.
 - LSL stream specification 1.1.0: montage name `C` and the `jaw_clench`
