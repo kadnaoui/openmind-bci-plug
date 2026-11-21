@@ -1,6 +1,6 @@
 # OpenMind LSL stream specification
 
-**Version 1.1.0**
+**Version 1.2.0**
 
 This document is the contract between producers of EEG streams (OpenMind Plug,
 or any third-party tool) and their consumers (OpenMind Core, Sandbox, recorders,
@@ -12,6 +12,8 @@ Field names follow the [XDF meta-data conventions](https://github.com/sccn/xdf/w
 where they exist, so standard tools (LabRecorder, pyxdf, MNE) read them natively.
 
 A producer publishes **two LSL streams**: the EEG stream and the markers stream.
+Other programs (for instance the calibration scenes of OpenMind Sandbox) may
+publish markers streams of their own (section 2.3).
 `openmind-plug check-stream` checks a live stream against this document.
 
 ## 1. EEG stream
@@ -48,7 +50,7 @@ A producer publishes **two LSL streams**: the EEG stream and the markers stream.
 
 ```xml
 <desc>
-  <spec_version>1.1.0</spec_version>
+  <spec_version>1.2.0</spec_version>
   <channels>
     <channel>
       <label>C3</label>
@@ -99,7 +101,7 @@ Consumers **MUST** ignore unknown elements, so minor versions can add fields.
 | `channel_count` | **MUST** be `1` |
 | `nominal_srate` | **MUST** be `0` (irregular) |
 | `channel_format` | **MUST** be `string` |
-| `source_id` | **SHOULD** be the EEG `source_id` followed by `:markers` |
+| `source_id` | **SHOULD** be the EEG `source_id` followed by `:markers` for the stream paired with an EEG stream; another producer **SHOULD** use `openmind-<program>:<component>:markers` (e.g. `openmind-sandbox:bridge:markers`) |
 
 `desc` **MUST** contain `<spec_version>` (same rules as above).
 
@@ -110,18 +112,44 @@ Each sample is **one JSON object**, serialized as a compact UTF-8 string. It
 
 | `type` | Fields | Example |
 |---|---|---|
-| `cue` | `label`, `trial` (int, from 1) | `{"type":"cue","label":"left","trial":12,"source":"replay"}` |
+| `cue` | `label`, `trial` (int, from 1), `scene` (optional) | `{"type":"cue","label":"left","trial":12,"source":"replay"}` |
+| `trial_start` | `trial` (int, from 1); `label`, `scene` optional | `{"type":"trial_start","trial":12,"scene":"bird","source":"sandbox"}` |
+| `trial_end` | `trial` (int, from 1); `label`, `scene` optional | `{"type":"trial_end","trial":12,"scene":"bird","source":"sandbox"}` |
+| `event` | `label` (`session_start`, `session_end`, `block_start`, `block_end`...), `trial` `null` or absent, `scene` optional | `{"type":"event","label":"block_start","scene":"bird","source":"sandbox"}` |
 | `state` | `label` (`rest`, `left`, `right`, `feet`) | `{"type":"state","label":"left","source":"synthetic"}` |
 | `eyes` | `label` (`open`, `closed`) | `{"type":"eyes","label":"closed","source":"synthetic"}` |
 | `artifact` | `label` (`blink`, `muscle`, `jaw_clench`...); for `jaw_clench`, `count` (int, number of clenches: 1 or 2) | `{"type":"artifact","label":"jaw_clench","count":2,"source":"synthetic"}` |
 
 - `source` **SHOULD** name the producer of the marker (`synthetic`, `replay`,
   `sandbox`...).
+- `trial_start`, `trial_end`, `cue` and `event` follow the `marker` message of
+  the OpenMind protocol (OpenMind Core, `protocol/schemas/v1/marker.schema.json`),
+  which is relayed to LSL as is: its `v` and `ts` fields may be present. `ts` is
+  informative only; the LSL timestamp of the sample is the time of the event.
+- A trial whose `trial_start` is not followed by the `trial_end` of the same
+  `trial` (another `trial_start`, or the end of the session) was **interrupted**;
+  consumers **SHOULD** discard it.
 - Consumers **MUST** ignore unknown types and fields.
 - The timestamp of a marker **MUST** be on the same LSL clock as the EEG
   stream, equal to the timestamp of the first EEG sample the event applies to.
   Markers produced by another machine (e.g. Sandbox cues) rely on LSL clock
   synchronization.
+
+### 2.3 Several markers streams
+
+Several programs **MAY** publish a markers stream named `openmind-markers` at
+the same time: the stream paired with the EEG stream (plug: source state,
+artifacts, cues of a replayed dataset) and others (Sandbox: calibration cues
+and trials). They differ by their `source_id`, and their markers by `source`.
+
+- Consumers **MUST** read **every** `openmind-markers` stream, including streams
+  that appear after they started, and merge their markers by timestamp. A
+  consumer **MAY** restrict the producers it accepts by `source_id`.
+- Consumers **MUST** convert timestamps to their local LSL clock (time
+  correction), since producers may run on other machines.
+- Consumers that need markers of one producer only select them by `source`
+  (for instance, calibration uses the `cue` markers with `source` `sandbox`,
+  not the cues of a replayed dataset).
 
 ## 3. Versioning
 
@@ -135,3 +163,4 @@ This specification follows [Semantic Versioning](https://semver.org):
 |---|---|---|
 | 1.0.0 | 2026-11-18 | First version. |
 | 1.1.0 | 2026-11-20 | Montage `C` (eight motor electrodes); `jaw_clench` artifact marker with `count`. |
+| 1.2.0 | 2026-11-21 | Marker types `trial_start`, `trial_end`, `event` (from the OpenMind protocol); several `openmind-markers` streams, read and merged by consumers. |
