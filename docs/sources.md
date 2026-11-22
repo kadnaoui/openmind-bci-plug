@@ -329,6 +329,45 @@ source = BrainFlowSource(
   to the LSL clock on each read, so the stream is consistent with the markers.
 - `list-sources` shows `brainflow` as available only when the extra is installed.
 
+## IronBCI-8 source (experimental)
+
+`IronBCISource` reads the IronBCI-8 headset (ADS1299, 8 channels, 250 Hz) over
+Bluetooth LE with `bleak`, entirely locally. **Experimental:** written from the
+public documentation, not validated with the hardware until PLUG-090; plug logs a
+warning at start. Protocol notes, assumptions and the PiEEG Server alternative
+are in `docs/hardware/ironbci.md`.
+
+```bash
+pip install "openmind-plug[ironbci]"
+openmind-plug stream --source ironbci --montage C
+openmind-plug stream --source ironbci --ble-address <address>
+```
+
+- `--ble-name` (default: `EAREEG` or `IronBCI`) and `--ble-address` (skips the
+  scan; a UUID on macOS).
+- `--montage` names the 8 inputs in order (default `C`); other montages must
+  have exactly 8 electrodes.
+- `--gain` (default 1) divides the ADC counts; the default reproduces the
+  vendor's scale (about 0.268 uV per count), which is unconfirmed.
+- `--ble-counter` declares an assumed one-byte packet counter at the start of
+  each notification and enables lost-packet detection (the vendor documents no
+  counter).
+- **Timestamps.** The first notification anchors the LSL clock once; samples are
+  then stamped `t0 + index / srate`, skipping the samples of lost packets.
+- `list-sources` shows `ironbci` as `experimental` once `bleak` is installed.
+
+```python
+from openmind_plug.sources.ironbci import IronBCISource
+
+source = IronBCISource(address="...", montage="C")
+```
+
+Tests use `tests/fake_ironbci.py`, a simulated headset injected through the
+`scanner` and `client_factory` arguments, so they need no Bluetooth.
+
+To relay PiEEG Server's local LSL stream instead, see the last section of
+`docs/hardware/ironbci.md` (`--source lsl`).
+
 ## LSL relay
 
 `LSLSource` takes a third-party LSL stream (OpenBCI GUI, BrainFlow, PiEEG Server,

@@ -64,6 +64,17 @@ jobs:
       - run: uv sync --locked --extra brainflow
       - run: uv run pytest -m "not slow"
 
+  test-ironbci:
+    name: Tests with the ironbci extra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked --extra ironbci
+      - run: uv run pytest -m "not slow"
+
   build:
     name: Build distribution
     runs-on: ubuntu-latest

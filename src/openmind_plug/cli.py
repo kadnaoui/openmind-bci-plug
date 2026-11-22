@@ -65,6 +65,7 @@ class _SourceEntry:
     extra: str | None = None  # optional dependency group, if any
     module: str | None = None  # module that must be importable
     planned: bool = False
+    experimental: bool = False
 
 
 SOURCES: dict[SourceName, _SourceEntry] = {
@@ -77,7 +78,10 @@ SOURCES: dict[SourceName, _SourceEntry] = {
         "Any BrainFlow-supported board", "brainflow", module="brainflow"
     ),
     SourceName.ironbci: _SourceEntry(
-        "IronBCI-8 headset over BLE (experimental)", "ironbci", planned=True
+        "IronBCI-8 headset over BLE (experimental, not validated on hardware)",
+        "ironbci",
+        module="bleak",
+        experimental=True,
     ),
 }
 
@@ -87,7 +91,7 @@ def _source_status(entry: _SourceEntry) -> str:
         return "planned"
     if entry.module and importlib.util.find_spec(entry.module) is None:
         return f'needs: pip install "openmind-plug[{entry.extra}]"'
-    return "available"
+    return "experimental" if entry.experimental else "available"
 
 
 @app.command("list-sources")
@@ -117,6 +121,7 @@ _SYNTH = "Synthetic source"
 _REPLAY = "Replay source"
 _RELAY = "LSL relay"
 _BRAINFLOW = "BrainFlow source"
+_IRONBCI = "IronBCI source (experimental)"
 
 
 @app.command("stream")
@@ -241,6 +246,38 @@ def stream_command(
             rich_help_panel=_BRAINFLOW,
         ),
     ] = None,
+    ble_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Advertised BLE name (default: EAREEG or IronBCI).",
+            show_default=False,
+            rich_help_panel=_IRONBCI,
+        ),
+    ] = None,
+    ble_address: Annotated[
+        str | None,
+        typer.Option(
+            help="BLE address (a UUID on macOS); skips the scan.",
+            show_default=False,
+            rich_help_panel=_IRONBCI,
+        ),
+    ] = None,
+    gain: Annotated[
+        float,
+        typer.Option(
+            help="Divisor applied to the ADC counts (default 1, as the official scripts).",
+            rich_help_panel=_IRONBCI,
+        ),
+    ] = 1.0,
+    ble_counter: Annotated[
+        bool,
+        typer.Option(
+            "--ble-counter",
+            help="Payloads start with a one-byte packet counter (unconfirmed; "
+            "enables lost-packet detection).",
+            rich_help_panel=_IRONBCI,
+        ),
+    ] = False,
 ) -> None:
     """Stream an EEG source as the standard OpenMind LSL streams.
 
@@ -253,13 +290,15 @@ def stream_command(
       openmind-plug stream --source lsl --lsl-name obci_eeg1 --unit uV --montage A
 
       openmind-plug stream --source brainflow --board synthetic
+
+      openmind-plug stream --source ironbci --montage C   (experimental)
     """
     from openmind_plug.keyboard import key_reader, stdin_is_terminal
     from openmind_plug.outlet import EEGOutlet, stream
 
     entry = SOURCES[source]
     status = _source_status(entry)
-    if status != "available":
+    if status not in ("available", "experimental"):
         _fail(f"source {source.value!r} is not available: {status}")
 
     built = _build_source(
@@ -279,6 +318,7 @@ def stream_command(
         loop=loop,
         relay=_RelayOptions(lsl_name, lsl_type, lsl_source_id, unit, rename),
         brainflow=_BrainFlowOptions(board, tuple(board_param or ()), labels),
+        ironbci=_IronBCIOptions(ble_name, ble_address, gain, ble_counter),
     )
     info = built.info
     use_keyboard = source is SourceName.synthetic and (
@@ -301,6 +341,8 @@ def stream_command(
     except Exception as error:
         if source is SourceName.brainflow and _is_brainflow_error(error):
             _fail(f"BrainFlow board error: {error}")
+        if source is SourceName.ironbci and _is_ironbci_error(error):
+            _fail(str(error))
         raise
 
     ending = " (end of recording)" if getattr(built, "finished", False) else ""
@@ -545,6 +587,7 @@ def _build_source(
     loop: bool,
     relay: _RelayOptions | None = None,
     brainflow: _BrainFlowOptions | None = None,
+    ironbci: _IronBCIOptions | None = None,
 ) -> EEGSource:
     from pydantic import ValidationError
 
@@ -576,6 +619,9 @@ def _build_source(
 
     if source is SourceName.brainflow:
         return _build_brainflow(brainflow or _BrainFlowOptions(), resolved)
+
+    if source is SourceName.ironbci:
+        return _build_ironbci(ironbci or _IronBCIOptions(), resolved)
 
     from openmind_plug.sources.replay import MissingChannelsError, ReplaySource
 
@@ -691,6 +737,44 @@ def _build_brainflow(options: _BrainFlowOptions, montage: Montage | None) -> EEG
         if _is_brainflow_error(error):
             _fail(f"BrainFlow board error: {error}")
         raise
+
+
+@dataclass(frozen=True)
+class _IronBCIOptions:
+    name: str | None = None
+    address: str | None = None
+    gain: float = 1.0
+    counter: bool = False
+
+
+def _is_ironbci_error(error: BaseException) -> bool:
+    from openmind_plug.sources.ironbci import IronBCIError
+
+    return isinstance(error, IronBCIError)
+
+
+def _build_ironbci(options: _IronBCIOptions, montage: Montage | None) -> EEGSource:
+    from openmind_plug.sources.ironbci import (
+        IRONBCI_INSTALL,
+        IronBCISource,
+    )
+
+    typer.secho(
+        "IronBCI-8 driver is experimental: not validated on hardware yet.", fg=typer.colors.YELLOW
+    )
+    try:
+        source = IronBCISource(
+            name=options.name,
+            address=options.address,
+            montage=montage or "C",
+            gain=options.gain,
+            counter=options.counter,
+        )
+    except ImportError:
+        _fail(f"the ironbci source needs the ironbci extra: {IRONBCI_INSTALL}")
+    except ValueError as error:
+        _fail(str(error))
+    return source
 
 
 def _start_keyboard(

@@ -63,7 +63,7 @@ well-described EEG stream, inside or outside OpenMind.
 | `replay` | Public datasets (MOABB) and recorded files, in real time | available |
 | `lsl` | Relay of a third-party LSL stream, rewritten in standard form | available |
 | `brainflow` | Any board supported by BrainFlow, including its synthetic board | available (needs the `brainflow` extra) |
-| `ironbci` | IronBCI-8 headset over BLE | planned (experimental) |
+| `ironbci` | IronBCI-8 headset over BLE | experimental (needs the `ironbci` extra; not validated on hardware) |
 
 The synthetic source is close enough to real EEG to develop and test the whole
 chain without a headset: imagining a hand movement lowers the mu and beta

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `IronBCISource` (`ironbci` extra, **experimental**): IronBCI-8 over Bluetooth
+  LE with `bleak`, with a pure `PacketDecoder` (24-bit two's complement to
+  microvolts, configurable gain and Vref, optional packet counter with
+  lost-packet detection) and timestamps on the LSL clock. Written from the
+  public documentation and tested with a simulated headset; not validated on
+  hardware until PLUG-090. Protocol notes and open assumptions in
+  `docs/hardware/ironbci.md`.
+- `stream --source ironbci` with `--ble-name`, `--ble-address`, `--gain` and
+  `--ble-counter`; `list-sources` reports it as `experimental`. CI runs the tests
+  with the `ironbci` extra. Documented relay of PiEEG Server's local LSL stream
+  with `--source lsl`.
 - `BrainFlowSource` (`brainflow` extra): the EEG channels of any BrainFlow
   board, in microvolts on the LSL clock, labelled from the wired electrodes or
   the board's defaults, optionally selected by montage. Tested with the

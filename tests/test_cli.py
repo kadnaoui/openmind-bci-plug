@@ -26,13 +26,14 @@ def test_list_sources_shows_every_source() -> None:
     assert result.exit_code == 0
     for name in SourceName:
         assert name.value in result.output
-    assert "planned" in result.output
+    assert "experimental" in result.output or "needs" in result.output
 
 
 def test_source_status() -> None:
     assert _source_status(SOURCES[SourceName.synthetic]) == "available"
     assert _source_status(SOURCES[SourceName.lsl]) == "available"
-    assert _source_status(SOURCES[SourceName.ironbci]) == "planned"
+    expected_ble = "experimental" if importlib.util.find_spec("bleak") else "needs"
+    assert _source_status(SOURCES[SourceName.ironbci]).startswith(expected_ble)
     expected = "available" if importlib.util.find_spec("brainflow") else "needs"
     assert _source_status(SOURCES[SourceName.brainflow]).startswith(expected)
 
@@ -102,7 +103,6 @@ def test_stream_replay_file_until_the_end(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        (["-s", "ironbci"], "not available: planned"),
         (["-s", "synthetic", "--montage", "Z"], "unknown montage"),
         (["-s", "synthetic", "--srate", "50"], "srate"),
         (["-s", "synthetic", "--line-freq", "55"], "line_freq_hz"),
@@ -113,6 +113,35 @@ def test_stream_reports_usage_errors(args: list[str], message: str) -> None:
     result = runner.invoke(app, ["stream", *args, "--no-keyboard"])
     assert result.exit_code == 2
     assert message in result.output
+
+
+def test_stream_ironbci_without_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None)
+    result = runner.invoke(app, ["stream", "-s", "ironbci", "--no-keyboard"])
+    assert result.exit_code == 2
+    assert "openmind-plug[ironbci]" in result.output
+
+
+def test_stream_ironbci_reports_a_missing_headset(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import types
+    from importlib.machinery import ModuleSpec
+
+    from openmind_plug.sources import ironbci
+
+    fake_bleak = types.ModuleType("bleak")
+    fake_bleak.__spec__ = ModuleSpec("bleak", None)
+    fake_bleak.BleakClient = object  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "bleak", fake_bleak)
+
+    async def not_found(name: str | None, address: str | None, timeout: float) -> str:
+        raise ironbci.IronBCIError("no BLE device named EAREEG found")
+
+    monkeypatch.setattr(ironbci, "_bleak_scan", not_found)
+    result = runner.invoke(app, ["stream", "-s", "ironbci", "--no-keyboard", "--duration", "1"])
+    assert result.exit_code == 2
+    assert "experimental" in result.output
+    assert "no BLE device" in result.output
 
 
 def test_stream_replay_unknown_dataset() -> None:
