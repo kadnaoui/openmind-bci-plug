@@ -3,6 +3,12 @@
 A driver is an `EEGSource` subclass. Implement it, and the LSL output, the
 recorder, the quality checks and the CLI work with your headset for free.
 
+> **Quickest path.** If BrainFlow supports your board (OpenBCI Cyton and
+> Ganglion, Muse, Neurosity, g.tec Unicorn...), you do not need a new driver:
+> `openmind-plug stream --source brainflow --board <name>` already works. See
+> the BrainFlow section of `docs/sources.md`. Write a driver only for hardware
+> BrainFlow does not cover.
+
 ## 1. Describe the stream
 
 Build a `StreamInfo` once, in the constructor:

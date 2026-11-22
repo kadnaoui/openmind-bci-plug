@@ -6,12 +6,17 @@ BrainFlow's synthetic board (no hardware) and are skipped without the extra.
 
 from __future__ import annotations
 
+import threading
 import time
+import uuid
 
 import numpy as np
 import pylsl
 import pytest
+from typer.testing import CliRunner
 
+from openmind_plug.cli import app
+from openmind_plug.inlet import check_stream
 from openmind_plug.montage import get_montage
 from openmind_plug.sources import EEGSource
 from openmind_plug.sources.brainflow import (
@@ -146,3 +151,120 @@ class TestSyntheticBoard:
         source.stop()
         source.stop()
         assert not source.is_running
+
+
+# --- Command line -----------------------------------------------------------------
+
+runner = CliRunner()
+
+
+def test_cli_without_the_extra_gives_the_install_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.util
+
+    import openmind_plug.cli as cli
+    from openmind_plug.sources.brainflow import BRAINFLOW_INSTALL
+
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        cli.importlib.util,
+        "find_spec",
+        lambda name, *a, **k: None if name == "brainflow" else real_find_spec(name, *a, **k),
+    )
+    result = runner.invoke(app, ["stream", "-s", "brainflow", "--no-keyboard"])
+    assert result.exit_code == 2
+    assert BRAINFLOW_INSTALL in result.output
+    listing = runner.invoke(app, ["list-sources"])
+    assert "needs: " + BRAINFLOW_INSTALL in listing.output
+
+
+def test_cli_import_error_gives_the_install_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    import openmind_plug.sources.brainflow as module
+
+    def missing() -> None:
+        raise ImportError(
+            f"the BrainFlow source needs the brainflow extra: {module.BRAINFLOW_INSTALL}"
+        )
+
+    monkeypatch.setattr(module, "_import_brainflow", missing)
+    result = runner.invoke(app, ["stream", "-s", "brainflow", "--no-keyboard"])
+    # With the extra missing the status check fails first; with it, the import error does.
+    assert result.exit_code == 2
+    assert module.BRAINFLOW_INSTALL in result.output
+
+
+@pytest.mark.usefixtures("brainflow_module")
+class TestCli:
+    def test_unknown_board(self) -> None:
+        result = runner.invoke(app, ["stream", "-s", "brainflow", "--board", "nope"])
+        assert result.exit_code == 2
+        assert "unknown BrainFlow board" in result.output
+
+    def test_bad_board_param(self) -> None:
+        result = runner.invoke(app, ["stream", "-s", "brainflow", "--board-param", "oops"])
+        assert result.exit_code == 2
+        assert "KEY=VALUE" in result.output
+        result = runner.invoke(app, ["stream", "-s", "brainflow", "--board-param", "nope=1"])
+        assert result.exit_code == 2
+        assert "unknown BrainFlow parameter" in result.output
+
+    def test_wrong_label_count(self) -> None:
+        result = runner.invoke(app, ["stream", "-s", "brainflow", "--labels", "C3,C4"])
+        assert result.exit_code == 2
+        assert "16 EEG inputs, got 2 labels" in result.output
+
+    def test_params_follow_the_brainflow_types(self) -> None:
+        from openmind_plug.sources.brainflow import BrainFlowSource
+
+        source = BrainFlowSource(
+            "synthetic", params={"timeout": "5", "serial_number": "0012", "ip_port": 6789}
+        )
+        params = source._input_params
+        assert (params.timeout, params.serial_number, params.ip_port) == (5, "0012", 6789)
+        with pytest.raises(BrainFlowSourceError, match="'timeout' must be an integer"):
+            BrainFlowSource("synthetic", params={"timeout": "soon"})
+
+    @pytest.mark.parametrize(
+        ("extra", "labels"),
+        [
+            ([], SYNTHETIC_NAMES),
+            (
+                ["--labels", ",".join(MONTAGE_C_WIRING), "--montage", "C"],
+                list(get_montage("C").labels),
+            ),
+        ],
+    )
+    def test_streams_the_standard_outlet(self, extra: list[str], labels: list[str]) -> None:
+        source_id = f"openmind-plug-test:{uuid.uuid4()}"
+        outputs: list[object] = []
+
+        def run() -> None:
+            outputs.append(
+                runner.invoke(
+                    app,
+                    [
+                        "stream",
+                        "-s",
+                        "brainflow",
+                        "--duration",
+                        "3",
+                        "--no-keyboard",
+                        "--source-id",
+                        source_id,
+                        *extra,
+                    ],
+                )
+            )
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        try:
+            report = check_stream(timeout=5, duration=1.5, source_id=source_id)
+        finally:
+            thread.join(timeout=15)
+        assert report.ok, report.errors
+        assert report.info is not None
+        assert list(report.info.labels) == labels
+        assert report.info.driver == "brainflow"
+        assert report.n_samples > 100
+        (result,) = outputs
+        assert result.exit_code == 0, result.output  # type: ignore[attr-defined]

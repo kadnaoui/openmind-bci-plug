@@ -91,7 +91,7 @@ class BrainFlowSource(EEGSource):
                     f"unknown BrainFlow parameter {key!r}; expected one of "
                     f"{sorted(k for k in vars(self._input_params) if not k.startswith('_'))}"
                 )
-            setattr(self._input_params, key, value)
+            setattr(self._input_params, key, _coerce(key, value, getattr(self._input_params, key)))
 
         descr = board_shim.get_board_descr(self._board_id)
         eeg_rows: list[int] = list(descr.get("eeg_channels", []))
@@ -241,6 +241,23 @@ def unix_to_lsl(stamps: Any) -> TimestampArray:
     """
     offset = float(pylsl.local_clock()) - time.time()
     return np.asarray(stamps, dtype=np.float64) + offset
+
+
+def _coerce(key: str, value: Any, default: Any) -> Any:
+    """Convert a parameter given as text to the type BrainFlow expects for it.
+
+    Integer parameters (``ip_port``, ``timeout``...) are converted; text
+    parameters (``serial_number``, ``mac_address``...) stay as given, so
+    ``"0012"`` keeps its leading zeros.
+    """
+    if isinstance(default, bool) or not isinstance(default, int) or not isinstance(value, str):
+        return value
+    try:
+        return int(value)
+    except ValueError:
+        raise BrainFlowSourceError(
+            f"BrainFlow parameter {key!r} must be an integer, got {value!r}"
+        ) from None
 
 
 def _import_brainflow() -> tuple[Any, Any]:

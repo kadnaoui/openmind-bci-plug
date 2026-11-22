@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   board, in microvolts on the LSL clock, labelled from the wired electrodes or
   the board's defaults, optionally selected by montage. Tested with the
   BrainFlow synthetic board, without hardware.
+- `stream --source brainflow` with `--board`, repeatable `--board-param
+  KEY=VALUE` and `--labels`; `list-sources` reports it as available when the
+  extra is installed. CI runs the tests with the `brainflow` extra.
 - LSL stream specification 1.2.0: marker types `trial_start`, `trial_end` and
   `event` (from the OpenMind protocol), and several `openmind-markers` streams
   at once (section 2.3). Additive: 1.x consumers keep working.

@@ -73,7 +73,9 @@ SOURCES: dict[SourceName, _SourceEntry] = {
         "Recorded files (any MNE format) or public datasets, in real time"
     ),
     SourceName.lsl: _SourceEntry("Relay of a third-party LSL stream, in standard form"),
-    SourceName.brainflow: _SourceEntry("Any BrainFlow-supported board", "brainflow", planned=True),
+    SourceName.brainflow: _SourceEntry(
+        "Any BrainFlow-supported board", "brainflow", module="brainflow"
+    ),
     SourceName.ironbci: _SourceEntry(
         "IronBCI-8 headset over BLE (experimental)", "ironbci", planned=True
     ),
@@ -114,6 +116,7 @@ def _datasets_available() -> bool:
 _SYNTH = "Synthetic source"
 _REPLAY = "Replay source"
 _RELAY = "LSL relay"
+_BRAINFLOW = "BrainFlow source"
 
 
 @app.command("stream")
@@ -212,6 +215,32 @@ def stream_command(
             rich_help_panel=_RELAY,
         ),
     ] = None,
+    board: Annotated[
+        str,
+        typer.Option(
+            help="BoardIds name (CYTON_BOARD...) or numeric id; 'synthetic' needs no hardware.",
+            rich_help_panel=_BRAINFLOW,
+        ),
+    ] = "synthetic",
+    board_param: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--board-param",
+            help="Board connection parameter KEY=VALUE, e.g. serial_port=/dev/ttyUSB0 "
+            "(repeatable).",
+            show_default=False,
+            rich_help_panel=_BRAINFLOW,
+        ),
+    ] = None,
+    labels: Annotated[
+        str | None,
+        typer.Option(
+            help="Electrodes wired to the board inputs, in board order, e.g. C3,Cz,C4 "
+            "(default: the board's own names).",
+            show_default=False,
+            rich_help_panel=_BRAINFLOW,
+        ),
+    ] = None,
 ) -> None:
     """Stream an EEG source as the standard OpenMind LSL streams.
 
@@ -222,6 +251,8 @@ def stream_command(
       openmind-plug stream --source replay --dataset bnci2014_001 --subject 1
 
       openmind-plug stream --source lsl --lsl-name obci_eeg1 --unit uV --montage A
+
+      openmind-plug stream --source brainflow --board synthetic
     """
     from openmind_plug.keyboard import key_reader, stdin_is_terminal
     from openmind_plug.outlet import EEGOutlet, stream
@@ -247,22 +278,30 @@ def stream_command(
         speed=speed,
         loop=loop,
         relay=_RelayOptions(lsl_name, lsl_type, lsl_source_id, unit, rename),
+        brainflow=_BrainFlowOptions(board, tuple(board_param or ()), labels),
     )
     info = built.info
     use_keyboard = source is SourceName.synthetic and (
         keyboard if keyboard is not None else stdin_is_terminal()
     )
 
-    with EEGOutlet(info, source_id=source_id) as outlet, ExitStack() as stack:
-        typer.secho(f"Streaming {outlet.source_id}", bold=True)
-        typer.echo(f"  {info.n_channels} channels @ {info.srate:g} Hz: {', '.join(info.labels)}")
-        stop = threading.Event()
-        if use_keyboard:
-            _start_keyboard(built, stack.enter_context(key_reader()), stop)
-        else:
-            typer.echo("  Press Ctrl+C to stop.")
-        stats = stream(built, duration=duration, stop_event=stop, outlet=outlet)
-        stop.set()
+    try:
+        with EEGOutlet(info, source_id=source_id) as outlet, ExitStack() as stack:
+            typer.secho(f"Streaming {outlet.source_id}", bold=True)
+            typer.echo(
+                f"  {info.n_channels} channels @ {info.srate:g} Hz: {', '.join(info.labels)}"
+            )
+            stop = threading.Event()
+            if use_keyboard:
+                _start_keyboard(built, stack.enter_context(key_reader()), stop)
+            else:
+                typer.echo("  Press Ctrl+C to stop.")
+            stats = stream(built, duration=duration, stop_event=stop, outlet=outlet)
+            stop.set()
+    except Exception as error:
+        if source is SourceName.brainflow and _is_brainflow_error(error):
+            _fail(f"BrainFlow board error: {error}")
+        raise
 
     ending = " (end of recording)" if getattr(built, "finished", False) else ""
     typer.echo(
@@ -505,6 +544,7 @@ def _build_source(
     speed: float,
     loop: bool,
     relay: _RelayOptions | None = None,
+    brainflow: _BrainFlowOptions | None = None,
 ) -> EEGSource:
     from pydantic import ValidationError
 
@@ -533,6 +573,9 @@ def _build_source(
 
     if source is SourceName.lsl:
         return _build_relay(relay or _RelayOptions(), resolved)
+
+    if source is SourceName.brainflow:
+        return _build_brainflow(brainflow or _BrainFlowOptions(), resolved)
 
     from openmind_plug.sources.replay import MissingChannelsError, ReplaySource
 
@@ -599,6 +642,55 @@ def _build_relay(options: _RelayOptions, montage: Montage | None) -> EEGSource:
         )
     except (StreamNotFoundError, LSLSourceError) as error:
         _fail(str(error))
+
+
+@dataclass(frozen=True)
+class _BrainFlowOptions:
+    board: str = "synthetic"
+    params: tuple[str, ...] = ()
+    labels: str | None = None
+
+
+def _parse_board_params(items: tuple[str, ...]) -> dict[str, str]:
+    """Parse ``KEY=VALUE`` items; the source converts values to the parameter type."""
+    params: dict[str, str] = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep or not key.strip():
+            _fail(f"invalid board parameter {item!r}; expected KEY=VALUE")
+        params[key.strip()] = value.strip()
+    return params
+
+
+def _is_brainflow_error(error: BaseException) -> bool:
+    try:
+        from brainflow.board_shim import BrainFlowError
+    except ImportError:
+        return False
+    return isinstance(error, BrainFlowError)
+
+
+def _build_brainflow(options: _BrainFlowOptions, montage: Montage | None) -> EEGSource:
+    from openmind_plug.sources.brainflow import (
+        BRAINFLOW_INSTALL,
+        BrainFlowSource,
+        BrainFlowSourceError,
+    )
+
+    labels = [label.strip() for label in options.labels.split(",")] if options.labels else None
+    if labels is not None and not all(labels):
+        _fail(f"invalid --labels {options.labels!r}; expected a comma-separated list")
+    params = _parse_board_params(options.params)
+    try:
+        return BrainFlowSource(options.board, params=params, labels=labels, montage=montage)
+    except ImportError:
+        _fail(f"the brainflow source needs the brainflow extra: {BRAINFLOW_INSTALL}")
+    except BrainFlowSourceError as error:
+        _fail(str(error))
+    except Exception as error:
+        if _is_brainflow_error(error):
+            _fail(f"BrainFlow board error: {error}")
+        raise
 
 
 def _start_keyboard(

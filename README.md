@@ -62,7 +62,7 @@ well-described EEG stream, inside or outside OpenMind.
 | `synthetic` | Realistic generator: 1/f background, alpha, mu and beta rhythms with controllable desynchronization, blinks, muscle, jaw clenches, mains noise. Seeded, so the same seed gives the same signal. | available |
 | `replay` | Public datasets (MOABB) and recorded files, in real time | available |
 | `lsl` | Relay of a third-party LSL stream, rewritten in standard form | available |
-| `brainflow` | Any board supported by BrainFlow | planned |
+| `brainflow` | Any board supported by BrainFlow, including its synthetic board | available (needs the `brainflow` extra) |
 | `ironbci` | IronBCI-8 headset over BLE | planned (experimental) |
 
 The synthetic source is close enough to real EEG to develop and test the whole
