@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `BrainFlowSource` (`brainflow` extra): the EEG channels of any BrainFlow
+  board, in microvolts on the LSL clock, labelled from the wired electrodes or
+  the board's defaults, optionally selected by montage. Tested with the
+  BrainFlow synthetic board, without hardware.
 - LSL stream specification 1.2.0: marker types `trial_start`, `trial_end` and
   `event` (from the OpenMind protocol), and several `openmind-markers` streams
   at once (section 2.3). Additive: 1.x consumers keep working.
