@@ -175,7 +175,7 @@ MONTAGE_C = Montage(
 MONTAGES: dict[str, Montage] = {m.name: m for m in (MONTAGE_A, MONTAGE_B, MONTAGE_C)}
 
 #: Name of the montage used when none is given.
-DEFAULT_MONTAGE = "A"
+DEFAULT_MONTAGE = "C"
 
 
 def get_montage(name: str = DEFAULT_MONTAGE) -> Montage:

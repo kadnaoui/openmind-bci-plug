@@ -126,7 +126,7 @@ def stream_command(
         typer.Option(
             "--montage",
             "-m",
-            help="Montage (A, B, C). Default: A for synthetic, every EEG channel for replay.",
+            help="Montage (A, B, C). Default: C for synthetic, every EEG channel for replay.",
             show_default=False,
         ),
     ] = None,
@@ -217,7 +217,7 @@ def stream_command(
 
     Examples:
 
-      openmind-plug stream --source synthetic --montage A
+      openmind-plug stream --source synthetic --montage C
 
       openmind-plug stream --source replay --dataset bnci2014_001 --subject 1
 
@@ -508,7 +508,7 @@ def _build_source(
 ) -> EEGSource:
     from pydantic import ValidationError
 
-    from openmind_plug.montage import get_montage
+    from openmind_plug.montage import DEFAULT_MONTAGE, get_montage
 
     resolved: Montage | None = None
     if montage is not None:
@@ -527,7 +527,9 @@ def _build_source(
                 line_noise_uv=line_noise,
                 line_freq_hz=line_freq,  # type: ignore[arg-type]  # validated by pydantic
             )
-            return SyntheticSource(montage=resolved or "A", srate=srate, seed=seed, config=config)
+            return SyntheticSource(
+                montage=resolved or DEFAULT_MONTAGE, srate=srate, seed=seed, config=config
+            )
         except (ValidationError, ValueError) as error:
             _fail(str(error))
 

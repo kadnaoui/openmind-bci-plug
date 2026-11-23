@@ -18,9 +18,12 @@ from openmind_plug.montage import (
 from openmind_plug.sources import StreamInfo
 
 
-def test_montage_a_is_motor_imagery_default() -> None:
-    assert DEFAULT_MONTAGE == "A"
-    assert get_montage() is MONTAGE_A
+def test_montage_c_is_the_default() -> None:
+    assert DEFAULT_MONTAGE == "C"
+    assert get_montage() is MONTAGES["C"]
+
+
+def test_montage_a_is_motor_imagery_with_blink_channel() -> None:
     assert MONTAGE_A.labels == ("FC3", "FC4", "C3", "Cz", "C4", "CP3", "CP4", "Fp1")
 
 

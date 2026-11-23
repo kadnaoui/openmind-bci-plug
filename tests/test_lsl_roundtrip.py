@@ -244,7 +244,7 @@ def test_check_stream_validates_synthetic_source() -> None:
     assert report.ok, report.errors
     assert report.warnings == []
     assert report.info is not None
-    assert report.info.labels == get_montage("A").labels
+    assert report.info.labels == get_montage("C").labels
     assert report.n_samples > 200
     assert report.effective_srate == pytest.approx(250.0, rel=0.05)
 

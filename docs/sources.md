@@ -106,9 +106,9 @@ A montage is the ordered list of electrodes wired to the amplifier inputs.
 
 | Name | Electrodes (input order) | Use |
 |---|---|---|
-| **`A`** (default) | `FC3, FC4, C3, Cz, C4, CP3, CP4, Fp1` | Motor imagery: sensorimotor cortex, plus `Fp1` for blink detection |
+| `A` | `FC3, FC4, C3, Cz, C4, CP3, CP4, Fp1` | Motor imagery: sensorimotor cortex, plus `Fp1` for blink detection |
 | `B` | `C3, Cz, C4, CP3, CP4, Fp1, O1, O2` | SSVEP variant: occipital `O1`/`O2` instead of `FC3`/`FC4` |
-| `C` | `FC3, FC4, C3, Cz, C4, CP3, CP4, CPz` | Motor imagery on eight motor electrodes (`CPz` for the feet area); the jaw clench of the `action` command is read on the same electrodes. Planned for the IronBCI-8 |
+| **`C`** (default) | `FC3, FC4, C3, Cz, C4, CP3, CP4, CPz` | Motor imagery on eight motor electrodes (`CPz` for the feet area); the jaw clench of the `action` command is read on the same electrodes. Planned for the IronBCI-8 |
 
 ```python
 from openmind_plug.montage import get_montage, position
@@ -133,7 +133,7 @@ controllable motor-imagery state and optional artifacts.
 ```python
 from openmind_plug.sources.synthetic import SyntheticConfig, SyntheticSource
 
-source = SyntheticSource(montage="A", srate=250, seed=42)
+source = SyntheticSource(srate=250, seed=42)  # montage "C" by default
 with source:
     source.set_state("left")  # imagine a left-hand movement
     samples, timestamps = source.read(max_samples=64)
@@ -173,7 +173,7 @@ raises posterior alpha the same way.
 
 | Artifact | Model | Settings |
 |---|---|---|
-| Blink | Hann pulse of 0.25-0.4 s, strongest on Fp1/Fp2 (σ = 3 cm) | `blink_rate_per_min`, `blink_uv` (120), or `blink()` / key `b` |
+| Blink | Hann pulse of 0.25-0.4 s, strongest on Fp1/Fp2 (σ = 3 cm); barely visible with the default montage `C`, which has no `Fp1` (use montage `A` or `B`) | `blink_rate_per_min`, `blink_uv` (120), or `blink()` / key `b` |
 | Muscle | Burst of 0.5-1.5 s of noise above 30 Hz, stronger on lateral channels | `muscle_rate_per_min`, `muscle_uv` (20 µV RMS) |
 | Jaw clench | On demand only: burst of 0.2-0.3 s of noise above 30 Hz on every electrode (stronger laterally); a double clench is two bursts 0.6-0.75 s apart, with a release of at least 0.3 s | `clench(count=2)` / key `j`, `clench_uv` (120 µV RMS) |
 | Power line | Sinusoid with a per-channel gain | `line_noise_uv`, `line_freq_hz` (50 or 60) |

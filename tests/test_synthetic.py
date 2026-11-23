@@ -55,8 +55,8 @@ def test_info_matches_montage() -> None:
     assert all(c.unit == "uV" for c in source.info.channels)
 
 
-def test_default_montage_is_a() -> None:
-    assert SyntheticSource().info.montage == "A"
+def test_default_montage_is_c() -> None:
+    assert SyntheticSource().info.montage == "C"
 
 
 @pytest.mark.parametrize("srate", [MIN_SRATE - 1, 0, float("nan"), float("inf")])
@@ -172,7 +172,7 @@ def test_eyes_closed_increase_posterior_alpha() -> None:
 
 
 def test_blink_is_detectable_on_fp1() -> None:
-    source = SyntheticSource(seed=0)
+    source = SyntheticSource(montage="A", seed=0)
     baseline = source.generate(2 * FS)
     source.blink()
     with_blink = source.generate(FS)

@@ -40,7 +40,7 @@ import pylsl
 from pydantic import BaseModel, ConfigDict, Field
 from scipy import signal
 
-from openmind_plug.montage import Montage, get_montage, position
+from openmind_plug.montage import DEFAULT_MONTAGE, Montage, get_montage, position
 from openmind_plug.sources.base import (
     EEGSource,
     Marker,
@@ -140,7 +140,7 @@ class SyntheticSource(EEGSource):
     """Realistic synthetic EEG with controllable motor-imagery state.
 
     Args:
-        montage: Montage name or object; defines the channels (default ``"A"``).
+        montage: Montage name or object; defines the channels (default ``"C"``).
         srate: Sampling rate in Hz, at least :data:`MIN_SRATE`.
         seed: Random seed; the same seed gives the same signal.
         config: Amplitudes and artifacts; defaults to :class:`SyntheticConfig`.
@@ -158,7 +158,7 @@ class SyntheticSource(EEGSource):
 
     def __init__(
         self,
-        montage: str | Montage = "A",
+        montage: str | Montage = DEFAULT_MONTAGE,
         srate: float = 250.0,
         seed: int | None = None,
         config: SyntheticConfig | None = None,

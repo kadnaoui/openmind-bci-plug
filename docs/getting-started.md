@@ -15,10 +15,10 @@ uv run openmind-plug --version
 ## 2. Stream synthetic EEG (1 min)
 
 ```bash
-uv run openmind-plug stream --source synthetic --montage A
+uv run openmind-plug stream --source synthetic --montage C
 ```
 
-You now publish `openmind-eeg`: 8 channels (FC3, FC4, C3, Cz, C4, CP3, CP4, Fp1)
+You now publish `openmind-eeg`: 8 channels (FC3, FC4, C3, Cz, C4, CP3, CP4, CPz)
 at 250 Hz, in microvolts, plus an `openmind-markers` stream. Leave it running.
 (Other programs, such as the calibration scenes of OpenMind Sandbox, may publish
 `openmind-markers` streams too: consumers read and merge all of them.)
@@ -30,7 +30,7 @@ In this terminal, single keys change what the simulated user does:
 | `s` | imagine the **feet**: drop on Cz |
 | `r` | back to **rest** |
 | `e` | close / open the eyes: alpha rises at the back of the head |
-| `b` | blink: large slow wave on Fp1 |
+| `b` | blink: large slow wave on Fp1 (montage `A` or `B` only: montage `C` has no Fp1, so the blink is nearly invisible) |
 | `j` | double jaw clench: two short muscle bursts on every electrode |
 | `q` | quit |
 

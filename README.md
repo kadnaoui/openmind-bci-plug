@@ -74,7 +74,7 @@ rhythms over the opposite hemisphere, as it does in real recordings.
   <img src="docs/media/synthetic-spectra-light.png" alt="Power spectra of the synthetic source at C3 and C4: the mu peak near 10 Hz and the beta peak near 21 Hz drop on C3 when the right hand is imagined and on C4 when the left hand is imagined">
 </picture>
 
-Three montages are built in (`A`, `B`, `C`); montage `C` holds the eight motor
+Three montages are built in (`A`, `B`, `C`); montage `C` is the default and holds the eight motor
 electrodes used by OpenMind Core (`FC3, FC4, C3, Cz, C4, CP3, CP4, CPz`).
 See [Sources](docs/sources.md) for every option.
 
