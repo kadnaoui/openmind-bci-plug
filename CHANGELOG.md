@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Montage `C` is now the default montage (synthetic source, `DEFAULT_MONTAGE`,
+  CLI help), since OpenMind Core reads the `action` jaw clench on the motor
+  electrodes. Montage `A` stays available with `--montage A`. The synthetic
+  source therefore has no `Fp1` by default: blinks are barely visible unless
+  montage `A` or `B` is chosen.
+
 ### Added
 
 - `examples/validate_ironbci.py`: guided hardware validation (connection, rate and
@@ -49,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the accepted producers, `marker_sources` lists them. The recorder therefore
   keeps the calibration markers of OpenMind Sandbox.
 - Montage `C` (`FC3, FC4, C3, Cz, C4, CP3, CP4, CPz`): eight motor electrodes,
-  without Fp1, planned for the IronBCI-8. Montage `A` stays the default.
+  without Fp1, planned for the IronBCI-8.
 - LSL stream specification 1.1.0: montage name `C` and the `jaw_clench`
   artifact marker (with `count`). Additive: 1.0 consumers keep working.
 - Synthetic jaw clench, single or double (`clench()`, key `j`, `clench_uv`),

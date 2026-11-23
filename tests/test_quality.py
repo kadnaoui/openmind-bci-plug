@@ -25,7 +25,7 @@ def synthetic(seconds: float = 4.0, montage: str = "A", **config: float) -> np.n
     return source.generate(int(seconds * FS)).astype(np.float64)
 
 
-LABELS_A = SyntheticSource().info.labels
+LABELS_A = SyntheticSource(montage="A").info.labels
 
 
 def statuses(samples: np.ndarray, **kwargs: object) -> dict[str, str]:

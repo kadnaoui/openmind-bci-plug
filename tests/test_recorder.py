@@ -201,7 +201,7 @@ def test_record_then_replay_is_identical(tmp_path: Path) -> None:
     replay_clock = FakeClock(now=0.0)
     replay = ReplaySource.from_file(path, srate=FS, clock=replay_clock)
     assert replay.info.labels == source.info.labels
-    assert replay.info.montage == "A"
+    assert replay.info.montage == "C"
     assert replay.info.model == "synthetic"
     assert replay.info.reference == "none"
     with replay:
@@ -259,7 +259,7 @@ def test_cli_record_saves_a_replayable_file(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "Saved" in result.output
     replay = ReplaySource.from_file(out)
-    assert replay.info.montage == "A"
+    assert replay.info.montage == "C"
     assert 150 < replay.n_samples < 400
 
 
