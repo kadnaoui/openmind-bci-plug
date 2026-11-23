@@ -93,7 +93,7 @@ files = ["src", "examples"]
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["pylsl.*", "mne.*", "moabb.*", "brainflow.*", "scipy.*"]
+module = ["pylsl.*", "mne.*", "moabb.*", "brainflow.*", "bleak.*", "scipy.*"]
 ignore_missing_imports = true
 
 # --- Tests -----------------------------------------------------------------

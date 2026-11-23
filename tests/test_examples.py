@@ -53,3 +53,49 @@ def test_record_and_replay(tmp_path: Path) -> None:
     assert process.returncode == 0, process.stdout + process.stderr
     assert "Replayed 2500 samples" in process.stdout
     assert list((tmp_path / "recordings" / "P00").glob("P00_*_raw.fif"))
+
+
+def run_validation(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(EXAMPLES / "validate_ironbci.py"), *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ, "OPENMIND_DATA_DIR": str(tmp_path)},
+    )
+
+
+def test_validate_ironbci_runs_on_synthetic_source(tmp_path: Path) -> None:
+    process = run_validation(
+        tmp_path,
+        "--source", "synthetic", "--subject", "P01", "--seed", "1", "--yes",
+        "--duration", "3", "--phase", "2", "--clenches", "2",
+        "--tap-window", "2", "--latency-seconds", "2",
+    )  # fmt: skip
+    assert process.returncode == 0, process.stdout + process.stderr
+    reports = list((tmp_path / "validation").glob("P01_*_ironbci.md"))
+    assert len(reports) == 1
+    text = reports[0].read_text(encoding="utf-8")
+    for item in (
+        "Effective sampling rate",
+        "Channel order | PASS",
+        "Double jaw clench detected | PASS",
+        "Latency to LSL | PASS",
+        "Alpha test",
+        "REF/BIAS",
+    ):
+        assert item in text, text
+
+
+def test_validate_ironbci_refuses_a_path_inside_a_git_repository(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    process = run_validation(tmp_path / "data", "--yes", "--steps", "a")
+    assert process.returncode == 2
+    assert "Git repository" in process.stderr
+    assert not (tmp_path / "data").exists()
+
+
+def test_validate_ironbci_rejects_a_real_name(tmp_path: Path) -> None:
+    process = run_validation(tmp_path, "--subject", "alice", "--yes")
+    assert process.returncode == 2
+    assert not (tmp_path / "validation").exists()

@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `examples/validate_ironbci.py`: guided hardware validation (connection, rate and
+  packet loss, channel order, alpha test, jaw clench, latency to LSL) that runs
+  today on the synthetic source and later on the headset, with a Markdown report
+  under `$OPENMIND_DATA_DIR/validation/`; validation checklist and "After
+  validation" procedure in `docs/hardware/ironbci.md`.
+- `IronBCISource` (`ironbci` extra, **experimental**): IronBCI-8 over Bluetooth
+  LE with `bleak`, with a pure `PacketDecoder` (24-bit two's complement to
+  microvolts, configurable gain and Vref, optional packet counter with
+  lost-packet detection) and timestamps on the LSL clock. Written from the
+  public documentation and tested with a simulated headset; not validated on
+  hardware until PLUG-090. Protocol notes and open assumptions in
+  `docs/hardware/ironbci.md`.
+- `stream --source ironbci` with `--ble-name`, `--ble-address`, `--gain` and
+  `--ble-counter`; `list-sources` reports it as `experimental`. CI runs the tests
+  with the `ironbci` extra. Documented relay of PiEEG Server's local LSL stream
+  with `--source lsl`.
+- `BrainFlowSource` (`brainflow` extra): the EEG channels of any BrainFlow
+  board, in microvolts on the LSL clock, labelled from the wired electrodes or
+  the board's defaults, optionally selected by montage. Tested with the
+  BrainFlow synthetic board, without hardware.
+- `stream --source brainflow` with `--board`, repeatable `--board-param
+  KEY=VALUE` and `--labels`; `list-sources` reports it as available when the
+  extra is installed. CI runs the tests with the `brainflow` extra.
 - LSL stream specification 1.2.0: marker types `trial_start`, `trial_end` and
   `event` (from the OpenMind protocol), and several `openmind-markers` streams
   at once (section 2.3). Additive: 1.x consumers keep working.

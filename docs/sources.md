@@ -281,6 +281,93 @@ Downloads are stored in `$OPENMIND_DATA_DIR/mne_data` (default
 `MNE_DATASETS_*_PATH` variables only while loading, so your global MNE
 configuration is left untouched.
 
+## BrainFlow source
+
+[BrainFlow](https://brainflow.org) drives many EEG boards (OpenBCI Cyton and
+Ganglion, Muse, Neurosity, g.tec Unicorn...) behind one API, and includes a
+**synthetic board** that needs no hardware. `BrainFlowSource` exposes the EEG
+channels of a BrainFlow board as a standard source.
+
+```bash
+pip install "openmind-plug[brainflow]"
+
+# BrainFlow's synthetic board, no hardware
+openmind-plug stream --source brainflow --board synthetic
+
+# A real board: connection parameters, wired electrodes, montage
+openmind-plug stream --source brainflow --board cyton \
+    --board-param serial_port=/dev/ttyUSB0 \
+    --labels FC3,FC4,C3,Cz,C4,CP3,CP4,CPz --montage C
+```
+
+```python
+from openmind_plug.sources.brainflow import BrainFlowSource
+
+source = BrainFlowSource(
+    "CYTON_BOARD",
+    params={"serial_port": "/dev/ttyUSB0"},
+    labels=["FC3", "FC4", "C3", "Cz", "C4", "CP3", "CP4", "CPz"],
+    montage="C",
+)
+```
+
+- `--board` is a `BoardIds` name (case-insensitive, the `_BOARD` suffix is
+  optional) or a numeric id. Default: `synthetic`.
+- `--board-param KEY=VALUE` (repeatable) sets an attribute of BrainFlow's
+  `BrainFlowInputParams` (`serial_port`, `mac_address`, `ip_address`...). Numeric
+  values are passed as integers, others as strings.
+- Only the board's EEG rows are read; BrainFlow gives them in microvolts.
+- **Labels.** `--labels` names the electrodes you wired, in board input order,
+  and must give one label per EEG input of the board. Without it, plug uses the
+  electrode names BrainFlow documents for the board (`Ch1`, `Ch2`... if there are
+  none). Those defaults describe the board's standard cap, not necessarily
+  yours: give `--labels` whenever the wiring differs.
+- **Montage.** `--montage` selects and orders channels by label, so the labels
+  must include every electrode of the montage; otherwise the error lists the
+  missing ones.
+- **Timestamps.** BrainFlow stamps samples with the Unix clock; they are moved
+  to the LSL clock on each read, so the stream is consistent with the markers.
+- `list-sources` shows `brainflow` as available only when the extra is installed.
+
+## IronBCI-8 source (experimental)
+
+`IronBCISource` reads the IronBCI-8 headset (ADS1299, 8 channels, 250 Hz) over
+Bluetooth LE with `bleak`, entirely locally. **Experimental:** written from the
+public documentation, not validated with the hardware until PLUG-090; plug logs a
+warning at start. Protocol notes, assumptions and the PiEEG Server alternative
+are in `docs/hardware/ironbci.md`.
+
+```bash
+pip install "openmind-plug[ironbci]"
+openmind-plug stream --source ironbci --montage C
+openmind-plug stream --source ironbci --ble-address <address>
+```
+
+- `--ble-name` (default: `EAREEG` or `IronBCI`) and `--ble-address` (skips the
+  scan; a UUID on macOS).
+- `--montage` names the 8 inputs in order (default `C`); other montages must
+  have exactly 8 electrodes.
+- `--gain` (default 1) divides the ADC counts; the default reproduces the
+  vendor's scale (about 0.268 uV per count), which is unconfirmed.
+- `--ble-counter` declares an assumed one-byte packet counter at the start of
+  each notification and enables lost-packet detection (the vendor documents no
+  counter).
+- **Timestamps.** The first notification anchors the LSL clock once; samples are
+  then stamped `t0 + index / srate`, skipping the samples of lost packets.
+- `list-sources` shows `ironbci` as `experimental` once `bleak` is installed.
+
+```python
+from openmind_plug.sources.ironbci import IronBCISource
+
+source = IronBCISource(address="...", montage="C")
+```
+
+Tests use `tests/fake_ironbci.py`, a simulated headset injected through the
+`scanner` and `client_factory` arguments, so they need no Bluetooth.
+
+To relay PiEEG Server's local LSL stream instead, see the last section of
+`docs/hardware/ironbci.md` (`--source lsl`).
+
 ## LSL relay
 
 `LSLSource` takes a third-party LSL stream (OpenBCI GUI, BrainFlow, PiEEG Server,
