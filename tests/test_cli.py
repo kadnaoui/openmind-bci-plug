@@ -72,6 +72,26 @@ def test_stream_synthetic_for_a_duration() -> None:
     assert "Stopped after" in result.output
 
 
+def test_stream_synthetic_subject_and_session() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "stream", "-s", "synthetic", "--duration", "0.3", "--no-keyboard",
+            "--source-id", unique_id(), "--subject", "3", "--session", "2",
+        ],
+    )  # fmt: skip
+    assert result.exit_code == 0, result.output
+    assert "Synthetic subject 3, session 2" in result.output
+
+
+def test_stream_synthetic_rejects_a_named_session() -> None:
+    result = runner.invoke(
+        app, ["stream", "-s", "synthetic", "--session", "session_T", "--no-keyboard"]
+    )
+    assert result.exit_code == 2
+    assert "numbers" in result.output
+
+
 def test_stream_replay_file_until_the_end(tmp_path: Path) -> None:
     mne = pytest.importorskip("mne")
     import numpy as np

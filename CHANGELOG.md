@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stream --source brainflow` with `--board`, repeatable `--board-param
   KEY=VALUE` and `--labels`; `list-sources` reports it as available when the
   extra is installed. CI runs the tests with the `brainflow` extra.
+- Synthetic subjects (`SyntheticSubject`, `SyntheticSource(subject=..., session=...)`,
+  `openmind-plug stream --source synthetic --subject N [--session S]`): individual
+  rhythm frequencies, ERD depth (including weak desynchronizers), electrode gains,
+  noise and spatial mixing, drawn deterministically from the seed and id, plus a
+  small session-to-session drift, to test calibration and alignment in Core.
+  Without a subject the signal is unchanged.
 - LSL stream specification 1.2.0: marker types `trial_start`, `trial_end` and
   `event` (from the OpenMind protocol), and several `openmind-markers` streams
   at once (section 2.3). Additive: 1.x consumers keep working.

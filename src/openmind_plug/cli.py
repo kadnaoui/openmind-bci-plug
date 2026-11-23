@@ -174,11 +174,23 @@ def stream_command(
         typer.Option(help="Public dataset (bnci2014_001, physionetmi).", rich_help_panel=_REPLAY),
     ] = None,
     subject: Annotated[
-        int, typer.Option(help="Dataset subject number.", min=1, rich_help_panel=_REPLAY)
-    ] = 1,
+        int | None,
+        typer.Option(
+            help="Subject: dataset subject number (replay, default 1) or synthetic subject "
+            "id (synthetic, default: neutral subject).",
+            min=0,
+            show_default=False,
+            rich_help_panel=_REPLAY,
+        ),
+    ] = None,
     session: Annotated[
         str | None,
-        typer.Option(help="Dataset session (default: first).", rich_help_panel=_REPLAY),
+        typer.Option(
+            help="Session: dataset session name (replay, default: first) or session number "
+            "with small drift (synthetic).",
+            show_default=False,
+            rich_help_panel=_REPLAY,
+        ),
     ] = None,
     file: Annotated[
         Path | None,
@@ -284,6 +296,8 @@ def stream_command(
     Examples:
 
       openmind-plug stream --source synthetic --montage A
+
+      openmind-plug stream --source synthetic --subject 3 --session 2
 
       openmind-plug stream --source replay --dataset bnci2014_001 --subject 1
 
@@ -580,7 +594,7 @@ def _build_source(
     line_noise: float,
     line_freq: int,
     dataset: str | None,
-    subject: int,
+    subject: int | None,
     session: str | None,
     file: Path | None,
     speed: float,
@@ -610,7 +624,25 @@ def _build_source(
                 line_noise_uv=line_noise,
                 line_freq_hz=line_freq,  # type: ignore[arg-type]  # validated by pydantic
             )
-            return SyntheticSource(montage=resolved or "A", srate=srate, seed=seed, config=config)
+            session_number: int | None = None
+            if session is not None:
+                try:
+                    session_number = int(session)
+                except ValueError:
+                    _fail(f"synthetic sessions are numbers, got {session!r}")
+            if session_number is not None and session_number < 0:
+                _fail("--session must be >= 0")
+            if subject is not None:
+                note = f", session {session_number}" if session_number is not None else ""
+                typer.echo(f"Synthetic subject {subject}{note}")
+            return SyntheticSource(
+                montage=resolved or "A",
+                srate=srate,
+                seed=seed,
+                config=config,
+                subject=subject,
+                session=session_number,
+            )
         except (ValidationError, ValueError) as error:
             _fail(str(error))
 
@@ -634,10 +666,11 @@ def _build_source(
             )
         if not _datasets_available():
             _fail(f"replaying public datasets needs MOABB: {_REPLAY_INSTALL}")
-        typer.echo(f"Loading {dataset} subject {subject} (downloaded on first use)...")
+        subject_number = 1 if subject is None else subject
+        typer.echo(f"Loading {dataset} subject {subject_number} (downloaded on first use)...")
         return ReplaySource.from_dataset(
             str(dataset),
-            subject=subject,
+            subject=subject_number,
             session=session,
             montage=resolved,
             srate=srate,

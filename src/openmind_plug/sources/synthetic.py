@@ -24,14 +24,22 @@ none. Gains move smoothly towards their target (time constant ``erd_tau_s``).
 **Reproducibility.** For a given seed and the same sequence of state changes, the
 signal only depends on the sample index, not on how it is split into reads: reading
 100 then 150 samples gives exactly the same data as reading 250 at once.
+
+**Synthetic subjects.** A :class:`SyntheticSubject` makes the simulated user individual:
+rhythm frequencies, ERD depth per class (including "BCI-illiterate" users), electrode
+contact gains, noise level and a small spatial mixing that changes the covariances.
+Subjects are drawn deterministically from ``(seed, subject_id)``; an optional session
+index adds a small session-to-session drift. Without a subject, the signal is exactly
+the one of :meth:`SyntheticSubject.default`.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from typing import Any, Final, Literal, cast
 
 import numpy as np
@@ -48,6 +56,8 @@ from openmind_plug.sources.base import (
     StreamInfo,
     TimestampArray,
 )
+
+logger = logging.getLogger(__name__)
 
 State = Literal["rest", "left", "right", "feet"]
 Eyes = Literal["open", "closed"]
@@ -83,6 +93,24 @@ _CLENCH_S: Final = (0.2, 0.3)  # duration of one clench burst
 # 0.3 s between the two bursts, as the gesture requires.
 _CLENCH_GAP_S: Final = (0.6, 0.75)
 
+#: Largest number of channels a :class:`SyntheticSubject` describes (gains and mixing).
+MAX_SUBJECT_CHANNELS: Final = 32
+#: Ranges drawn by :meth:`SyntheticSubject.sample`, as ``(low, high)``.
+ALPHA_HZ_RANGE: Final = (8.5, 12.0)  # individual alpha frequency
+MU_OFFSET_HZ: Final = 0.5  # mu is within this distance of alpha (and inside ALPHA_HZ_RANGE)
+BETA_HZ_RANGE: Final = (18.0, 24.0)
+ERD_DEPTH_RANGE: Final = (0.2, 0.7)  # relative power drop of a typical subject
+ERD_DEPTH_WEAK_RANGE: Final = (0.05, 0.15)  # "BCI-illiterate" subjects
+WEAK_ERD_PROBABILITY: Final = 0.15
+CHANNEL_GAIN_RANGE: Final = (0.7, 1.3)  # electrode contact
+NOISE_UV_RANGE: Final = (10.0, 20.0)  # RMS of the 1/f background
+RHYTHM_AMPLITUDE_UV_RANGE: Final = (6.0, 14.0)  # mu amplitude (peak, at the generator)
+MIXING_SPREAD: Final = 0.06  # std of the off-diagonal mixing terms
+SESSION_GAIN_SPREAD: Final = 0.05  # per-channel gain drift between sessions (+/- 5 %)
+SESSION_MIXING_SPREAD: Final = 0.015  # std of the mixing perturbation between sessions
+
+_ERD_CLASSES: Final = ("left", "right", "feet")
+
 
 class SyntheticConfig(BaseModel):
     """Amplitudes and artifact settings of :class:`SyntheticSource`.
@@ -109,6 +137,145 @@ class SyntheticConfig(BaseModel):
     clench_uv: float = Field(default=120.0, ge=0, description="RMS during a jaw clench.")
     line_noise_uv: float = Field(default=0.0, ge=0)
     line_freq_hz: Literal[50, 60] = 50
+
+
+@dataclass(frozen=True)
+class SyntheticSubject:
+    """Individual characteristics of a simulated user.
+
+    ``None`` means "use the :class:`SyntheticConfig` value" (or, for ``channel_gain``
+    and ``spatial_mixing``, no change), so that :meth:`default` reproduces the
+    original signal exactly.
+
+    Attributes:
+        subject_id: Identifier, also part of the random draw key.
+        alpha_hz: Individual alpha frequency (centre; each generator adds +/-0.5 Hz).
+        mu_hz: Centre frequency of the mu generators.
+        beta_hz: Centre frequency of the beta generators.
+        erd_depth: Relative power drop per class (``left``, ``right``, ``feet``).
+        channel_gain: Per-channel gain (electrode contact); the first
+            ``n_channels`` values are used.
+        noise_uv: RMS of the 1/f background, in microvolts.
+        spatial_mixing: Square matrix close to the identity applied to the channels
+            (volume conduction, reference); the leading block is used.
+        rhythm_amplitude_uv: Peak mu amplitude; beta keeps its config ratio to mu.
+    """
+
+    subject_id: int = 0
+    alpha_hz: float = 10.0
+    mu_hz: float = 10.5
+    beta_hz: float = 21.0
+    erd_depth: Mapping[str, float] | None = None
+    channel_gain: tuple[float, ...] | None = None
+    noise_uv: float | None = None
+    spatial_mixing: tuple[tuple[float, ...], ...] | None = None
+    rhythm_amplitude_uv: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.subject_id < 0:
+            raise ValueError(f"subject_id must be >= 0, got {self.subject_id}")
+        for name in ("alpha_hz", "mu_hz", "beta_hz"):
+            if not 1.0 <= getattr(self, name) <= 40.0:
+                raise ValueError(f"{name} must be within 1-40 Hz, got {getattr(self, name)}")
+        if self.erd_depth is not None:
+            if set(self.erd_depth) != set(_ERD_CLASSES):
+                raise ValueError(f"erd_depth needs exactly the classes {list(_ERD_CLASSES)}")
+            if not all(0.0 <= v <= 1.0 for v in self.erd_depth.values()):
+                raise ValueError("erd_depth values must be within [0, 1]")
+        if self.channel_gain is not None and not all(g > 0 for g in self.channel_gain):
+            raise ValueError("channel_gain values must be > 0")
+        if self.noise_uv is not None and self.noise_uv < 0:
+            raise ValueError("noise_uv must be >= 0")
+        if self.rhythm_amplitude_uv is not None and self.rhythm_amplitude_uv < 0:
+            raise ValueError("rhythm_amplitude_uv must be >= 0")
+        if self.spatial_mixing is not None:
+            size = len(self.spatial_mixing)
+            if size == 0 or any(len(row) != size for row in self.spatial_mixing):
+                raise ValueError("spatial_mixing must be a non-empty square matrix")
+
+    @classmethod
+    def default(cls) -> SyntheticSubject:
+        """The neutral subject: exactly the behaviour of a source with no subject."""
+        return cls()
+
+    @classmethod
+    def sample(cls, subject_id: int, seed: int = 0) -> SyntheticSubject:
+        """Draw a subject deterministically from ``(seed, subject_id)``.
+
+        About 15 % of subjects are weak desynchronizers (``ERD_DEPTH_WEAK_RANGE``).
+        Ranges are the module constants ``*_RANGE``.
+        """
+        if subject_id < 0 or seed < 0:
+            raise ValueError("subject_id and seed must be >= 0")
+        rng = np.random.default_rng((seed, subject_id))
+        alpha = float(rng.uniform(*ALPHA_HZ_RANGE))
+        mu = float(np.clip(alpha + rng.uniform(-MU_OFFSET_HZ, MU_OFFSET_HZ), *ALPHA_HZ_RANGE))
+        beta = float(rng.uniform(*BETA_HZ_RANGE))
+        weak = rng.random() < WEAK_ERD_PROBABILITY
+        depth_range = ERD_DEPTH_WEAK_RANGE if weak else ERD_DEPTH_RANGE
+        erd = {name: float(rng.uniform(*depth_range)) for name in _ERD_CLASSES}
+        gain = rng.uniform(*CHANNEL_GAIN_RANGE, size=MAX_SUBJECT_CHANNELS)
+        mixing = np.eye(MAX_SUBJECT_CHANNELS) + MIXING_SPREAD * rng.standard_normal(
+            (MAX_SUBJECT_CHANNELS, MAX_SUBJECT_CHANNELS)
+        )
+        return cls(
+            subject_id=subject_id,
+            alpha_hz=alpha,
+            mu_hz=mu,
+            beta_hz=beta,
+            erd_depth=erd,
+            channel_gain=tuple(float(g) for g in gain),
+            noise_uv=float(rng.uniform(*NOISE_UV_RANGE)),
+            spatial_mixing=tuple(tuple(float(v) for v in row) for row in mixing),
+            rhythm_amplitude_uv=float(rng.uniform(*RHYTHM_AMPLITUDE_UV_RANGE)),
+        )
+
+    def with_session(self, session: int, seed: int = 0) -> SyntheticSubject:
+        """Return this subject as seen in a given session (small drift).
+
+        Gains drift by up to +/-5 % per channel and the mixing is slightly perturbed,
+        drawn from ``(seed, subject_id, session)``: what cross-session alignment
+        corrects.
+        """
+        if session < 0 or seed < 0:
+            raise ValueError("session and seed must be >= 0")
+        rng = np.random.default_rng((seed, self.subject_id, session))
+        size = MAX_SUBJECT_CHANNELS
+        drift = rng.uniform(1 - SESSION_GAIN_SPREAD, 1 + SESSION_GAIN_SPREAD, size=size)
+        perturbation = SESSION_MIXING_SPREAD * rng.standard_normal((size, size))
+        base_gain = np.ones(size)
+        if self.channel_gain is not None:
+            base_gain[: len(self.channel_gain)] = self.channel_gain
+        base_mixing = np.eye(size)
+        if self.spatial_mixing is not None:
+            n = len(self.spatial_mixing)
+            base_mixing[:n, :n] = np.asarray(self.spatial_mixing)
+        return replace(
+            self,
+            channel_gain=tuple(float(g) for g in base_gain * drift),
+            spatial_mixing=tuple(
+                tuple(float(v) for v in row) for row in base_mixing + perturbation
+            ),
+        )
+
+    def _gain(self, n_channels: int) -> npt.NDArray[np.float64] | None:
+        if self.channel_gain is None:
+            return None
+        if len(self.channel_gain) < n_channels:
+            raise ValueError(
+                f"subject describes {len(self.channel_gain)} channels, montage has {n_channels}"
+            )
+        return np.asarray(self.channel_gain[:n_channels], dtype=np.float64)
+
+    def _mixing(self, n_channels: int) -> npt.NDArray[np.float64] | None:
+        if self.spatial_mixing is None:
+            return None
+        if len(self.spatial_mixing) < n_channels:
+            raise ValueError(
+                f"subject mixes {len(self.spatial_mixing)} channels, montage has {n_channels}"
+            )
+        matrix = np.asarray(self.spatial_mixing, dtype=np.float64)
+        return matrix[:n_channels, :n_channels]
 
 
 @dataclass
@@ -147,6 +314,11 @@ class SyntheticSource(EEGSource):
         emit_markers: Produce a marker at each state or eyes change and at each
             artifact, as ground truth (see :meth:`read_markers`).
         clock: Time source used by :meth:`read`; defaults to ``pylsl.local_clock``.
+        subject: Simulated user: a :class:`SyntheticSubject`, or an ``int`` id drawn with
+            :meth:`SyntheticSubject.sample` (``seed`` ``None`` counts as 0, so the same
+            id is always the same user). Default: :meth:`SyntheticSubject.default`.
+        session: Optional session index; adds the small session-to-session drift of
+            :meth:`SyntheticSubject.with_session`.
 
     Example::
 
@@ -164,10 +336,21 @@ class SyntheticSource(EEGSource):
         config: SyntheticConfig | None = None,
         emit_markers: bool = True,
         clock: Callable[[], float] = pylsl.local_clock,
+        subject: SyntheticSubject | int | None = None,
+        session: int | None = None,
     ) -> None:
         super().__init__()
         self._montage = get_montage(montage) if isinstance(montage, str) else montage
         self.config = config or SyntheticConfig()
+        subject_seed = seed if seed is not None else 0
+        if isinstance(subject, int):
+            subject = SyntheticSubject.sample(subject, subject_seed)
+        resolved = subject or SyntheticSubject.default()
+        if session is not None:
+            resolved = resolved.with_session(session, subject_seed)
+        self.subject = resolved
+        if subject is not None or session is not None:
+            logger.info("synthetic subject %d, session %s", resolved.subject_id, session)
         if not srate >= MIN_SRATE or not math.isfinite(srate):
             raise ValueError(f"srate must be finite and >= {MIN_SRATE} Hz, got {srate}")
         self._info = StreamInfo(
@@ -192,9 +375,14 @@ class SyntheticSource(EEGSource):
 
         # Background: unit-variance white noise through the pink filter, rescaled.
         impulse = signal.lfilter(_PINK_B, _PINK_A, np.r_[1.0, np.zeros(20_000)])
-        self._pink_scale = self.config.background_uv / float(np.sqrt(np.sum(impulse**2)))
+        noise_uv = self.subject.noise_uv
+        if noise_uv is None:
+            noise_uv = self.config.background_uv
+        self._pink_scale = noise_uv / float(np.sqrt(np.sum(impulse**2)))
         self._pink_zi = np.zeros((len(_PINK_A) - 1, n_channels))
 
+        self._channel_gain = self.subject._gain(n_channels)
+        self._mixing = self.subject._mixing(n_channels)
         self._rhythms = self._make_rhythms(positions, setup_rng)
         self._envelope_rho = math.exp(-1.0 / (srate * _ENVELOPE_TAU_S))
         self._envelope_zi = np.zeros((1, len(self._rhythms)))
@@ -392,6 +580,10 @@ class SyntheticSource(EEGSource):
         self._events = [e for e in self._events if e.stop > stop]
         self._produced = stop
         self._place_markers()
+        if self._mixing is not None:
+            out = out @ self._mixing.T
+        if self._channel_gain is not None:
+            out = out * self._channel_gain
         return out
 
     def _apply_changes(self) -> None:
@@ -420,7 +612,9 @@ class SyntheticSource(EEGSource):
                 targets.append(alpha_now / alpha_max if alpha_max > 0 else 1.0)
             elif rhythm.site == site:
                 # erd_depth is a power drop: amplitude scales with its square root.
-                targets.append(math.sqrt(1.0 - cfg.erd_depth))
+                depth = self.subject.erd_depth
+                depth_now = cfg.erd_depth if depth is None else depth[self._state]
+                targets.append(math.sqrt(1.0 - depth_now))
             else:
                 targets.append(1.0)
         self._gain_targets = targets
@@ -432,6 +626,13 @@ class SyntheticSource(EEGSource):
         self, positions: npt.NDArray[np.float64], rng: np.random.Generator
     ) -> list[_Rhythm]:
         cfg = self.config
+        subject = self.subject
+        mu_amplitude = (
+            cfg.mu_uv if subject.rhythm_amplitude_uv is None else subject.rhythm_amplitude_uv
+        )
+        beta_amplitude = cfg.beta_uv
+        if subject.rhythm_amplitude_uv is not None and cfg.mu_uv > 0:
+            beta_amplitude = cfg.beta_uv * subject.rhythm_amplitude_uv / cfg.mu_uv
         rhythms: list[_Rhythm] = []
         # Alpha: weight grows from 0 at the central line to 1 over the occipital pole.
         posterior = np.clip((-positions[:, 1] - 0.04) / 0.07, 0.0, 1.0)
@@ -439,14 +640,17 @@ class SyntheticSource(EEGSource):
             _Rhythm(
                 kind="alpha",
                 site="posterior",
-                freq_hz=10.0 + rng.uniform(-0.5, 0.5),
+                freq_hz=subject.alpha_hz + rng.uniform(-0.5, 0.5),
                 amplitude_uv=max(cfg.alpha_open_uv, cfg.alpha_closed_uv),
                 phase=rng.uniform(0, 2 * math.pi),
                 weights=posterior,
             )
         )
         centres = {"left": "C3", "central": "Cz", "right": "C4"}
-        for kind, base_hz, amplitude in (("mu", 10.5, cfg.mu_uv), ("beta", 21.0, cfg.beta_uv)):
+        for kind, base_hz, amplitude in (
+            ("mu", subject.mu_hz, mu_amplitude),
+            ("beta", subject.beta_hz, beta_amplitude),
+        ):
             for site, label in centres.items():
                 centre = np.array(position(label))
                 dist = np.linalg.norm(positions - centre, axis=1)

@@ -206,6 +206,47 @@ produces a marker whose timestamp is that of the first EEG sample it applies to:
   sample index, not on how it is split into reads.
 - `srate` must be at least 100 Hz.
 
+### Synthetic subjects
+
+By default the simulated user is a single neutral subject. To test calibration,
+alignment and cold start on many different users, give the source a subject:
+
+```python
+from openmind_plug.sources.synthetic import SyntheticSource, SyntheticSubject
+
+source = SyntheticSource(seed=42, subject=3)  # SyntheticSubject.sample(3, seed=42)
+later = SyntheticSource(seed=42, subject=3, session=2)  # same user, another day
+```
+
+`SyntheticSubject.sample(subject_id, seed=0)` draws every field from
+`numpy.random.default_rng((seed, subject_id))`, so the same id and seed always give
+the same user. Ranges are the `*_RANGE` constants of `openmind_plug.sources.synthetic`.
+
+| Field | Meaning | Sampled range |
+|---|---|---|
+| `alpha_hz`, `mu_hz`, `beta_hz` | Centre frequencies (each generator still adds ±0.5 Hz) | 8.5-12, alpha ±0.5, 18-24 |
+| `erd_depth` | Power drop per class (`left`, `right`, `feet`) | 0.2-0.7; 15 % of subjects "BCI-illiterate": 0.05-0.15 |
+| `channel_gain` | Electrode contact, per channel | 0.7-1.3 |
+| `noise_uv` | RMS of the 1/f background | 10-20 µV |
+| `rhythm_amplitude_uv` | Peak mu amplitude (beta keeps its ratio) | 6-14 µV |
+| `spatial_mixing` | Matrix close to the identity (off-diagonal σ = 0.06): covariances differ between subjects, which is what alignment corrects | - |
+
+`SyntheticSubject.default()` leaves every `None` field to the `SyntheticConfig`
+value and reproduces the signal of a source without subject exactly. `session`
+adds a small drift (gains ±5 %, slightly perturbed mixing) drawn from
+`(seed, subject_id, session)`: what cross-session alignment corrects. Without
+`seed`, the subject is drawn with seed 0. Gains and mixing cover up to 32 channels.
+
+On the command line, `--subject` and `--session` are shared with the replay source:
+
+```bash
+openmind-plug stream --source synthetic --subject 3 --session 2
+```
+
+With `--source replay`, `--subject` stays the dataset subject number (default 1)
+and `--session` the dataset session name. The subject is logged, not advertised: the
+stream metadata (`desc`) is unchanged, as the stream specification requires.
+
 ## Replay source
 
 `ReplaySource` plays back a recording as if it were live: a public dataset
