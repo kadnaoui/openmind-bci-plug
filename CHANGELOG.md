@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `examples/validate_ironbci.py`: guided hardware validation (connection, rate and
+  packet loss, channel order, alpha test, jaw clench, latency to LSL) that runs
+  today on the synthetic source and later on the headset, with a Markdown report
+  under `$OPENMIND_DATA_DIR/validation/`; validation checklist and "After
+  validation" procedure in `docs/hardware/ironbci.md`.
 - `IronBCISource` (`ironbci` extra, **experimental**): IronBCI-8 over Bluetooth
   LE with `bleak`, with a pure `PacketDecoder` (24-bit two's complement to
   microvolts, configurable gain and Vref, optional packet counter with
