@@ -13,6 +13,7 @@ import mne
 import numpy as np
 import pytest
 
+from openmind_plug.cli import _DATASET_KEYS
 from openmind_plug.paths import DATA_DIR_ENV, data_dir
 from openmind_plug.sources import EEGSource
 from openmind_plug.sources.replay import (
@@ -24,6 +25,7 @@ from openmind_plug.sources.replay import (
 
 SFREQ = 200.0
 DURATION_S = 10.0
+MONTAGE_C = ("FC3", "FC4", "C3", "Cz", "C4", "CP3", "CP4", "CPz")
 CHANNELS = ["Fp1", "FC3", "FC4", "C3", "Cz", "C4", "CP3", "CP4", "O1", "EOG1"]
 
 
@@ -257,6 +259,45 @@ def test_data_dir_follows_environment(tmp_path: Path, monkeypatch: pytest.Monkey
     assert data_dir() == Path.home() / "openmind-data"
 
 
+def test_cli_lists_every_dataset_key() -> None:
+    assert _DATASET_KEYS.split(", ") == list(DATASETS)
+
+
+class FakeMoabbDataset:
+    """Stands in for a MOABB dataset: two subjects, one session, one run."""
+
+    subject_list = [1, 2]  # noqa: RUF012
+    event_id = {"left_hand": 1, "right_hand": 2}  # noqa: RUF012
+
+    def get_data(self, subjects: list[int]) -> dict[int, dict[str, dict[str, mne.io.BaseRaw]]]:
+        return {subjects[0]: {"0": {"0": make_raw([*MONTAGE_C, "O1", "EOG1"])}}}
+
+
+@pytest.mark.parametrize(
+    ("key", "moabb_class"),
+    [
+        ("lee2019_mi", "Lee2019_MI"),
+        ("cho2017", "Cho2017"),
+        ("schirrmeister2017", "Schirrmeister2017"),
+    ],
+)
+def test_new_datasets_replay_with_montage_c(
+    key: str, moabb_class: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pytest.importorskip("moabb")
+    import moabb.datasets
+
+    monkeypatch.setenv(DATA_DIR_ENV, str(tmp_path))
+    monkeypatch.setattr(moabb.datasets, moabb_class, FakeMoabbDataset, raising=False)
+    assert get_dataset(key).moabb_class == moabb_class
+    source = ReplaySource.from_dataset(key, subject=1, montage="C", srate=SFREQ)
+    assert source.info.labels == ("FC3", "FC4", "C3", "Cz", "C4", "CP3", "CP4", "CPz")
+    assert source.info.montage == "C"
+    assert source.info.reference == get_dataset(key).reference
+    with pytest.raises(KeyError, match="subject 3"):
+        ReplaySource.from_dataset(key, subject=3)
+
+
 @pytest.mark.slow
 def test_replay_bnci2014_001_subject_1() -> None:
     pytest.importorskip("moabb")
@@ -282,3 +323,31 @@ def test_replay_bnci2014_001_subject_1() -> None:
     assert markers, "the first 10 s of a run contain at least one cue"
     assert {m.payload["label"] for m in markers} <= {"left", "right", "feet", "tongue"}
     assert all(m.payload["type"] == "cue" for m in markers)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    ("key", "labels"),
+    [
+        ("lee2019_mi", {"left", "right"}),
+        ("cho2017", {"left", "right"}),
+        ("schirrmeister2017", {"left", "right", "feet", "rest"}),
+    ],
+)
+def test_replay_large_dataset_with_montage_c(key: str, labels: set[str]) -> None:
+    """Downloads a whole subject (hundreds of MB): run with ``pytest -m slow -k large``."""
+    pytest.importorskip("moabb")
+    if os.environ.get("OPENMIND_RUN_DOWNLOADS") != "1":
+        pytest.skip("large download: set OPENMIND_RUN_DOWNLOADS=1 to run")
+    clock = FakeClock()
+    source = ReplaySource.from_dataset(key, subject=1, montage="C", speed=100.0, clock=clock)
+    assert source.info.labels == MONTAGE_C
+    assert source.info.srate == 250.0
+    assert set(source.event_labels) <= labels
+    with source:
+        clock.now += 5.0
+        samples, _ = source.read(1_000_000)
+        markers = source.read_markers()
+    assert samples.shape[1] == 8
+    assert 1 < np.median(samples.std(axis=0)) < 1000  # microvolts, not volts
+    assert markers

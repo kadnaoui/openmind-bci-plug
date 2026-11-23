@@ -80,6 +80,29 @@ DATASETS: Final[dict[str, DatasetSpec]] = {
         "64 EEG channels (10-10), 160 Hz, imagined hand and feet movements.",
         mne_signs=("EEGBCI",),
     ),
+    "lee2019_mi": DatasetSpec(
+        key="lee2019_mi",
+        moabb_class="Lee2019_MI",
+        description="Lee 2019 (OpenBMI): 54 subjects, 62 EEG channels (10-10), 1000 Hz, "
+        "2 sessions, left / right hand motor imagery.",
+        mne_signs=("LEE2019-MI",),
+        reference="nasion",
+    ),
+    "cho2017": DatasetSpec(
+        key="cho2017",
+        moabb_class="Cho2017",
+        description="Cho 2017 (GigaDB): 52 subjects, 64 EEG channels (10-10), 512 Hz, "
+        "left / right hand motor imagery.",
+        mne_signs=("GIGADB",),
+        reference="CMS/DRL",
+    ),
+    "schirrmeister2017": DatasetSpec(
+        key="schirrmeister2017",
+        moabb_class="Schirrmeister2017",
+        description="Schirrmeister 2017 (high-gamma): 14 subjects, 128 EEG channels, 500 Hz, "
+        "executed left hand / right hand / feet / rest.",
+        mne_signs=("SCHIRRMEISTER2017",),
+    ),
 }
 
 

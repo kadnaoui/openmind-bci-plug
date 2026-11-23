@@ -109,6 +109,8 @@ def list_sources() -> None:
         typer.echo(f"  {entry.description}{note}")
 
 
+#: Keys of ``openmind_plug.sources.replay.DATASETS`` (kept in sync by a test).
+_DATASET_KEYS = "bnci2014_001, physionetmi, lee2019_mi, cho2017, schirrmeister2017"
 _REPLAY_INSTALL = 'pip install "openmind-plug[replay]"'
 
 
@@ -171,7 +173,7 @@ def stream_command(
     ] = 50,
     dataset: Annotated[
         str | None,
-        typer.Option(help="Public dataset (bnci2014_001, physionetmi).", rich_help_panel=_REPLAY),
+        typer.Option(help="Public dataset: " + _DATASET_KEYS + ".", rich_help_panel=_REPLAY),
     ] = None,
     subject: Annotated[
         int | None,

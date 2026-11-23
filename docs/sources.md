@@ -273,10 +273,36 @@ with source:
 
 ### Supported datasets
 
-| Key | Dataset | Channels | Rate | Classes | Fits montage |
-|---|---|---|---|---|---|
-| `bnci2014_001` | BCI Competition IV 2a, 9 subjects | 22 EEG (no Fp1, no occipital) | 250 Hz | left, right, feet, tongue | none: use `montage=None` |
-| `physionetmi` | PhysioNet EEGMMIDB, 109 subjects | 64 EEG (10-10) | 160 Hz | left, right, hands, feet, rest | `A`, `B` |
+| Key | Dataset | Subjects | Classes | Channels | Rate | Download | Montage C |
+|---|---|---|---|---|---|---|---|
+| `bnci2014_001` | BCI Competition IV 2a | 9 | left, right, feet, tongue | 22 EEG (no Fp1, no occipital) | 250 Hz | ~0.4 GB | yes (not `A` or `B`: no Fp1, O1, O2) |
+| `physionetmi` | PhysioNet EEGMMIDB | 109 | left, right, hands, feet, rest | 64 EEG (10-10) | 160 Hz | ~2 GB | yes (`A` and `B` too) |
+| `lee2019_mi` | Lee 2019 (OpenBMI), 2 sessions | 54 | left, right | 62 EEG (10-10) | 1000 Hz | ~70 GB for all, ~1.3 GB per subject | yes |
+| `cho2017` | Cho 2017 (GigaDB) | 52 | left, right | 64 EEG (10-10) | 512 Hz | ~0.2 GB per subject | yes |
+| `schirrmeister2017` | Schirrmeister 2017 (high-gamma), executed movements | 14 | left, right, feet, rest | 128 EEG | 500 Hz | ~0.3 GB per subject | yes |
+
+Sizes are approximate; `from_dataset` downloads one subject at a time, on first
+use. Lee 2019 files are large (1000 Hz, two sessions): start with one subject.
+Schirrmeister 2017 records *executed* movements, not imagery. All recordings are
+resampled to 250 Hz by default.
+
+Licenses and citations (check the dataset page before redistributing anything):
+
+- `lee2019_mi`: CC BY 4.0 (GigaDB). Lee et al., "EEG dataset and OpenBMI
+  toolbox for three BCI paradigms", GigaScience 8(5), 2019,
+  doi:10.1093/gigascience/giz002.
+- `cho2017`: CC BY 4.0 as listed by MOABB (check the GigaDB page before redistributing). Cho et al., "EEG
+  datasets for motor imagery brain-computer interface", GigaScience 6(7), 2017,
+  doi:10.1093/gigascience/gix034.
+- `schirrmeister2017`: CC BY 4.0. Schirrmeister et al., "Deep learning with
+  convolutional neural networks for EEG decoding and visualization", Human Brain
+  Mapping 38(11), 2017, doi:10.1002/hbm.23730.
+
+Datasets are downloaded by script into `$OPENMIND_DATA_DIR`, never committed.
+Event names map to the same cue labels everywhere (`left_hand` → `left`,
+`right_hand` → `right`, `feet` → `feet`, `rest` → `rest`). Montage C
+(`FC3, FC4, C3, Cz, C4, CP3, CP4, CPz`) is present in the three new datasets
+(checked against the MOABB channel lists); use `montage="C"`.
 
 `from_dataset(dataset, subject=1, session=None, runs=None, ...)` loads the first
 session by default and concatenates all its runs, in order.
