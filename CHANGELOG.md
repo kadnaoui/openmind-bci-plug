@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Replay of three more public datasets, all containing montage `C`:
+  `lee2019_mi` (54 subjects), `cho2017` (52) and `schirrmeister2017` (14,
+  with `feet` and `rest`). Listed in `stream --help` and `docs/sources.md`.
 - LSL stream specification 1.2.0: marker types `trial_start`, `trial_end` and
   `event` (from the OpenMind protocol), and several `openmind-markers` streams
   at once (section 2.3). Additive: 1.x consumers keep working.
