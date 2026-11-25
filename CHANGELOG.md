@@ -62,3 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `replay`, `brainflow` and `ironbci`.
 - Tooling: ruff, strict mypy, pytest, pre-commit, GitHub Actions CI
   (Linux, macOS, Windows × Python 3.11, 3.12).
+
+### Fixed
+
+- `openmind-plug list-sources` sizes the status column to the longest status, so
+  a `needs: pip install ...` hint no longer shifts the description column.
