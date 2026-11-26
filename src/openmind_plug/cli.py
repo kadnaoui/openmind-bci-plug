@@ -98,11 +98,13 @@ def _source_status(entry: _SourceEntry) -> str:
 def list_sources() -> None:
     """List the EEG sources and whether they can be used."""
     width = max(len(name.value) for name in SOURCES)
+    statuses = {name: _source_status(entry) for name, entry in SOURCES.items()}
+    status_width = max(len(status) for status in statuses.values())
     for name, entry in SOURCES.items():
-        status = _source_status(entry)
+        status = statuses[name]
         color = typer.colors.GREEN if status == "available" else typer.colors.YELLOW
         typer.echo(f"{name.value:<{width}}  ", nl=False)
-        typer.secho(f"{status:<10}", fg=color, nl=False)
+        typer.secho(f"{status:<{status_width}}", fg=color, nl=False)
         note = ""
         if name is SourceName.replay and not _datasets_available():
             note = f" (datasets need: {_REPLAY_INSTALL})"

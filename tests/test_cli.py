@@ -29,6 +29,24 @@ def test_list_sources_shows_every_source() -> None:
     assert "experimental" in result.output or "needs" in result.output
 
 
+def test_list_sources_aligns_descriptions_with_an_unavailable_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import openmind_plug.cli as cli
+
+    missing = cli._SourceEntry("Needs a missing module", "lsl", module="openmind_no_such_module")
+    monkeypatch.setitem(cli.SOURCES, SourceName.lsl, missing)
+    result = runner.invoke(app, ["list-sources"])
+    assert result.exit_code == 0
+    assert 'needs: pip install "openmind-plug[lsl]"' in result.output
+    lines = result.output.splitlines()
+    starts = {
+        line.index(entry.description)
+        for line, entry in zip(lines, cli.SOURCES.values(), strict=True)
+    }
+    assert len(starts) == 1, lines
+
+
 def test_source_status() -> None:
     assert _source_status(SOURCES[SourceName.synthetic]) == "available"
     assert _source_status(SOURCES[SourceName.lsl]) == "available"
